@@ -4,7 +4,7 @@ module iterate (
     input  wire        enable,
     input  wire        n_valid,
 
-    input  wire        sign_in,        // ДОБАВЛЕНО - нужен знак из normalize
+    input  wire        sign_in,
     input  wire        is_nan_in,
     input  wire        is_pinf_in,
     input  wire        is_ninf_in,
@@ -21,156 +21,128 @@ module iterate (
     output reg [10:0]  mant_out
 );
 
-    localparam ROOT_BITS      = 11;
-    localparam ITER_MAX       = ROOT_BITS;
-    localparam WORK_MANT_BITS = ROOT_BITS + 1;
-    localparam RAD_BITS       = WORK_MANT_BITS + 2*ITER_MAX;
-    localparam REM_BITS       = ROOT_BITS + 4;
+    localparam ROOT_BITS = 11;
+    localparam ITER_MAX  = ROOT_BITS;
 
-    reg [RAD_BITS-1:0]        rad_reg = 0;
-    reg [REM_BITS-1:0]        rem_reg = 0;
-    reg [ROOT_BITS-1:0]       root_reg = 0;
-    reg [WORK_MANT_BITS-1:0]  work_mant = 0;
-    reg signed [6:0]          work_exp = 0;
-    reg [4:0]                 iter_left = 0;
-    reg                       active = 0;
-    
-    // Для хранения знака
-    reg                       stored_sign = 0;
+    // Registers for digit-by-digit algorithm
+    reg [21:0] radicand;      // 22 bits for mantissa processing
+    reg [14:0] remainder;     // 15 bits for remainder
+    reg [10:0] root;          // 11 bits result accumulator
+    reg [4:0]  iter_count;    // iteration counter
+    reg        computing;     // active computation flag
 
-    reg [1:0]                top2;
-    reg [REM_BITS-1:0]       rem_calc;
-    reg [REM_BITS-1:0]       trial_val;
-    reg [ROOT_BITS+1:0]      trial_root;
-    reg [ROOT_BITS-1:0]      new_root;
+    // Combinational logic for current iteration
+    reg [1:0]  top2;
+    reg [14:0] rem_shifted;
+    reg [12:0] trial_root;
+    reg [14:0] trial_val;
+    reg [10:0] next_root;
+    reg [14:0] next_rem;
 
     always @(posedge clk) begin
         if (!enable) begin
-            active     <= 1'b0;
-            iter_left  <= 0;
-            rad_reg    <= 0;
-            rem_reg    <= 0;
-            root_reg   <= 0;
-            work_mant  <= 0;
-            work_exp   <= 0;
-            sign_out   <= 1'b0;
-            exp_out    <= 7'sd0;
-            mant_out   <= 11'b0;
-            it_valid   <= 1'b0;
-            result     <= 1'b0;
-            stored_sign <= 1'b0;
+            // Reset all state
+            computing      <= 1'b0;
+            iter_count     <= 0;
+            radicand       <= 0;
+            remainder      <= 0;
+            root           <= 0;
+            sign_out       <= 1'b0;
+            exp_out        <= 7'sd0;
+            mant_out       <= 11'b0;
+            it_valid       <= 1'b0;
+            result         <= 1'b0;
         end
         else begin
             it_valid <= 1'b0;
-            
-            // Начало новых вычислений
-            if (!active && n_valid) begin
-                stored_sign <= sign_in;  // Сохраняем знак
+
+            // Start new computation when n_valid arrives
+            if (!computing && n_valid) begin
                 
-                // Обработка особых случаев
-                if (is_nan_in) begin
-                    sign_out <= 1'b1;
-                    exp_out  <= 7'sd16;
-                    mant_out <= 11'b10000000000;
-                    it_valid <= 1'b1;
-                    result   <= 1'b1;
-                    active   <= 1'b0;
+                // Case 1: Special values (handled by special.v, just pass through)
+                if (is_nan_in || is_pinf_in || is_ninf_in) begin
+                    // These are already processed by special.v
+                    // Just pass through the flags
+                    sign_out   <= sign_in;
+                    exp_out    <= exp_in;
+                    mant_out   <= mant_in;
+                    it_valid   <= 1'b1;
+                    result     <= 1'b1;
+                    computing  <= 1'b0;
                 end
-                else if (is_pinf_in) begin
-                    sign_out <= 1'b0;
-                    exp_out  <= 7'sd16;
-                    mant_out <= 11'b0;
-                    it_valid <= 1'b1;
-                    result   <= 1'b1;
-                    active   <= 1'b0;
+                // Case 2: Zero (is_num=0 and not special)
+                else if (!is_num) begin
+                    sign_out   <= sign_in;
+                    exp_out    <= -7'sd15;
+                    mant_out   <= 11'b0;
+                    it_valid   <= 1'b1;
+                    result     <= 1'b1;
+                    computing  <= 1'b0;
                 end
-                else if (is_ninf_in) begin
-                    sign_out <= 1'b1;
-                    exp_out  <= 7'sd16;
-                    mant_out <= 11'b10000000000;
-                    it_valid <= 1'b1;
-                    result   <= 1'b1;
-                    active   <= 1'b0;
-                end
-                else if (!is_num) begin  // Ноль
-                    sign_out <= sign_in;  // Используем входной знак
-                    exp_out  <= -7'sd15;
-                    mant_out <= 11'b0;
-                    it_valid <= 1'b1;
-                    result   <= 1'b1;
-                    active   <= 1'b0;
-                end
+                // Case 3: Normal positive number - start iteration
                 else begin
-                    // Нормальное число - начинаем итерации
-                    sign_out <= 1'b0;  // sqrt всегда положительный
+                    sign_out   <= 1'b0;  // sqrt is always positive
                     
-                    // Выравнивание экспоненты (должна быть четной)
-                    if (exp_in[0] == 1'b1) begin
-                        work_mant <= {mant_in, 1'b0};
-                        work_exp  <= exp_in - 1;
+                    // Adjust exponent (must be even) and prepare radicand
+                    // Mantissa is in format: 1.xxxxxxxxxx (11 bits with implicit 1)
+                    if (exp_in[0]) begin
+                        // Odd exponent: multiply mantissa by 2 (shift left by 1)
+                        // mant_in[10:0] << 11 gives us the mantissa in upper bits
+                        radicand <= {mant_in[10:0], 11'b0};
+                        exp_out  <= (exp_in - 7'sd1) >>> 1;
                     end else begin
-                        work_mant <= {1'b0, mant_in};
-                        work_exp  <= exp_in;
+                        // Even exponent: shift mantissa right by 1 to put in [1,2) range
+                        // This places it as 01.xxxxxxxxx in upper bits
+                        radicand <= {1'b0, mant_in[10:0], 10'b0};
+                        exp_out  <= exp_in >>> 1;
                     end
                     
-                    // ИСПРАВЛЕНО: Инициализация радиканда должна использовать
-                    // значение work_mant, но оно еще не обновилось!
-                    // Нужно использовать комбинационную логику
-                    if (exp_in[0] == 1'b1) begin
-                        rad_reg <= {{mant_in, 1'b0}, {(2*ITER_MAX){1'b0}}};
-                    end else begin
-                        rad_reg <= {{1'b0, mant_in}, {(2*ITER_MAX){1'b0}}};
-                    end
-                    
-                    rem_reg    <= 0;
-                    root_reg   <= 0;
-                    iter_left  <= ITER_MAX;
-                    active     <= 1'b1;
-                    
-                    // ИСПРАВЛЕНО: Экспонента тоже комбинационно
-                    if (exp_in[0] == 1'b1) begin
-                        exp_out <= (exp_in - 1) >>> 1;
-                    end else begin
-                        exp_out <= exp_in >>> 1;
-                    end
+                    remainder  <= 15'b0;
+                    root       <= 11'b0;
+                    iter_count <= ITER_MAX;
+                    computing  <= 1'b1;
                 end
             end
-            
-            // Выполнение итераций
-            else if (active && (iter_left != 0)) begin
-                // Digit-by-digit restoring square root
-                top2 = rad_reg[RAD_BITS-1 -: 2];
-                rem_calc = (rem_reg << 2) | {{(REM_BITS-2){1'b0}}, top2};
+
+            // Execute digit-by-digit iterations
+            else if (computing && iter_count > 0) begin
+                // Extract top 2 bits from radicand
+                top2 = radicand[21:20];
                 
-                // ИСПРАВЛЕНО: trial_root формируется как (root << 1) | 1
-                trial_root = ({2'b00, root_reg} << 1) | {{(ROOT_BITS+1){1'b0}}, 1'b1};
-                trial_val  = {{(REM_BITS - (ROOT_BITS+2)){1'b0}}, trial_root};
+                // Shift remainder left by 2 and add top2
+                rem_shifted = {remainder[12:0], top2};
                 
-                if (rem_calc >= trial_val) begin
-                    rem_reg  <= rem_calc - trial_val;
-                    new_root = (root_reg << 1) | 1'b1;
+                // Trial value: (2*root + 1)
+                // trial_root has 13 bits: (root << 1) | 1
+                trial_root = ({2'b00, root} << 1) | 13'd1;
+                trial_val = {2'b00, trial_root};
+                
+                // Compare and update
+                if (rem_shifted >= trial_val) begin
+                    next_rem  = rem_shifted - trial_val;
+                    next_root = {root[9:0], 1'b1};  // root*2 + 1
                 end else begin
-                    rem_reg  <= rem_calc;
-                    new_root = (root_reg << 1);
+                    next_rem  = rem_shifted;
+                    next_root = {root[9:0], 1'b0};  // root*2 + 0
                 end
                 
-                rad_reg  <= rad_reg << 2;
-                root_reg <= new_root;
+                // Update registers
+                remainder  <= next_rem;
+                root       <= next_root;
+                radicand   <= {radicand[19:0], 2'b00};  // shift left by 2
                 
-                // ИСПРАВЛЕНО: выравниваем биты корня слева (MSB)
-                // Сдвигаем влево на количество оставшихся итераций
-                mant_out <= new_root << (iter_left - 1);
+                // Output current result
+                mant_out   <= next_root;
+                it_valid   <= 1'b1;
+                iter_count <= iter_count - 5'd1;
                 
-                it_valid <= 1'b1;
-                iter_left <= iter_left - 1;
-                
-                // На последней итерации устанавливаем result
-                if (iter_left == 1) begin
-                    result <= 1'b1;
-                    active <= 1'b0;
+                // Check if this is the last iteration
+                if (iter_count == 5'd1) begin
+                    result    <= 1'b1;
+                    computing <= 1'b0;
                 end
             end
-            // ВАЖНО: result остается = 1 после завершения
+            // Hold result state until enable=0
         end
     end
 
