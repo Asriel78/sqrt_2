@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 module pack (
     input  wire        clk,
-    input  wire        enable,       // <--- добавлено
+    input  wire        enable,
     input  wire        it_valid,
 
     input  wire        sign_in,
@@ -49,15 +49,29 @@ module pack (
                 is_pinf_out <= is_pinf_in;
                 is_ninf_out <= is_ninf_in;
 
-                if (is_nan_in)
-                    out_data <= {1'b1, 5'b11111, 10'b1000000000};
-                else if (is_pinf_in)
-                    out_data <= {1'b0, 5'b11111, 10'b0000000000};
-                else if (is_ninf_in)
-                    out_data <= {1'b1, 5'b11111, 10'b0000000000};
+                // Случай 1: NaN - используем данные из normalize/special (уже правильные)
+                if (is_nan_in) begin
+                    // special уже установил правильный знак, exp=11111, и тихую мантиссу
+                    // Преобразуем из внутреннего формата (exp_in игнорируем, т.к. он уже 16)
+                    // mant_in[10:0] -> mant_out[9:0] (берем младшие 10 бит)
+                    out_data <= {sign_in, 5'b11111, mant_in[9:0]};
+                end
+                
+                // Случай 2: +Inf
+                else if (is_pinf_in) begin
+                    out_data <= 16'h7C00;  // 0_11111_0000000000
+                end
+                
+                // Случай 3: -Inf (это ошибка для sqrt, но на всякий случай)
+                else if (is_ninf_in) begin
+                    out_data <= 16'hFC00;  // 1_11111_0000000000
+                end
+                
+                // Случай 4: Обычное число
                 else begin
                     e_biased = exp_in + BIAS;
 
+                    // Subnormal результат
                     if (e_biased <= 0) begin
                         shift_amt = 1 - e_biased;
                         if (shift_amt >= 12)
@@ -67,7 +81,9 @@ module pack (
                             frac10 = shifted[9:0];
                         end
                         out_data <= {sign_in, 5'b00000, frac10};
-                    end else begin
+                    end
+                    // Normal результат
+                    else begin
                         frac10 = mant_in[9:0];
                         out_data <= {sign_in, e_biased[4:0], frac10};
                     end
