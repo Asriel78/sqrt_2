@@ -10,17 +10,11 @@ module sqrt2 (
     input  wire        ENABLE
 );
 
-    // ============================================================================
-    // Внутренние сигналы между модулями pipeline
-    // ============================================================================
-    
-    // load -> special
     wire        load_sign;
     wire [4:0]  load_exp;
     wire [9:0]  load_mant;
     wire        load_valid;
-    
-    // special -> normalize
+
     wire        spec_valid;
     wire        spec_is_nan;
     wire        spec_is_pinf;
@@ -31,7 +25,6 @@ module sqrt2 (
     wire [4:0]  spec_exp;
     wire [9:0]  spec_mant;
     
-    // normalize -> iterate
     wire        norm_valid;
     wire        norm_is_num;
     wire        norm_is_nan;
@@ -41,7 +34,6 @@ module sqrt2 (
     wire signed [6:0] norm_exp;
     wire [10:0] norm_mant;
     
-    // iterate -> pack
     wire        iter_valid;
     wire        iter_result;
     wire        iter_sign;
@@ -50,8 +42,7 @@ module sqrt2 (
     wire        iter_is_nan;
     wire        iter_is_pinf;
     wire        iter_is_ninf;
-    
-    // pack outputs
+
     wire        pack_valid;
     wire        pack_result;
     wire [15:0] pack_data;
@@ -59,26 +50,14 @@ module sqrt2 (
     wire        pack_is_pinf;
     wire        pack_is_ninf;
     
-    // ============================================================================
-    // Управление bidirectional шиной IO_DATA
-    // ============================================================================
     wire        drive_output;
     assign drive_output = pack_valid & pack_result;
     assign IO_DATA = drive_output ? pack_data : 16'hzzzz;
-    
-    // ============================================================================
-    // Выходные сигналы
-    // ============================================================================
     assign RESULT  = pack_result;
     assign IS_NAN  = pack_is_nan;
     assign IS_PINF = pack_is_pinf;
     assign IS_NINF = pack_is_ninf;
     
-    // ============================================================================
-    // Pipeline: load -> special -> normalize -> iterate -> pack
-    // ============================================================================
-    
-    // Stage 1: Загрузка данных с шины
     load load_inst (
         .clk(CLK),
         .enable(ENABLE),
@@ -88,8 +67,7 @@ module sqrt2 (
         .mant(load_mant),
         .valid(load_valid)
     );
-    
-    // Stage 2: Определение special значений и типа числа
+
     special special_inst (
         .clk(CLK),
         .enable(ENABLE),
@@ -107,8 +85,6 @@ module sqrt2 (
         .exp_out(spec_exp),
         .mant_out(spec_mant)
     );
-    
-    // Stage 3: Нормализация (добавление implicit bit, нормализация subnormal)
     normalize normalize_inst (
         .clk(CLK),
         .enable(ENABLE),
@@ -131,7 +107,6 @@ module sqrt2 (
         .mant_out(norm_mant)
     );
     
-    // Stage 4: Итерационное вычисление квадратного корня
     iterate iterate_inst (
         .clk(CLK),
         .enable(ENABLE),
@@ -153,7 +128,6 @@ module sqrt2 (
         .is_ninf_out(iter_is_ninf)
     );
     
-    // Stage 5: Упаковка результата в half precision формат
     pack pack_inst (
         .clk(CLK),
         .enable(ENABLE),
