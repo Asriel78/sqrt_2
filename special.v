@@ -22,7 +22,7 @@ module special (
 );
 
     localparam [4:0] EXP_MAX = 5'b11111;
-    localparam [9:0] QUIET_BIT = 10'b1000000000;  // Бит тишины для NaN
+    localparam [9:0] QUIET_BIT = 10'b1000000000;  
 
     wire is_input_nan;
     wire is_negative_number;
@@ -45,26 +45,20 @@ module special (
             s_valid <= 1'b0;
 
             if (valid) begin
-                // По умолчанию передаем как есть
                 sign_out <= sign_in;
                 exp_out  <= exp_in;
                 mant_out <= mant_in;
 
-                // Случай 1: Входной NaN - делаем тихим и передаем флаг
                 if (is_input_nan) begin
                     is_nan       <= 1'b1;
                     is_pinf      <= 1'b0;
                     is_ninf      <= 1'b0;
                     is_normal    <= 1'b0;
                     is_subnormal <= 1'b0;
-                    
-                    // Делаем NaN тихим (устанавливаем quiet bit)
-                    sign_out <= sign_in;  // Сохраняем знак
+                    sign_out <= sign_in;  
                     exp_out  <= EXP_MAX;
-                    mant_out <= mant_in | QUIET_BIT;  // Устанавливаем бит 9
+                    mant_out <= mant_in | QUIET_BIT; 
                 end
-                
-                // Случай 2: Отрицательное число (не ±0, не ±Inf) -> канонический тихий NaN
                 else if (is_negative_number) begin
                     is_nan       <= 1'b1;
                     is_pinf      <= 1'b0;
@@ -72,13 +66,11 @@ module special (
                     is_normal    <= 1'b0;
                     is_subnormal <= 1'b0;
                     
-                    // Канонический тихий NaN: sign=1, exp=11111, mant=1000000000
                     sign_out <= 1'b1;
                     exp_out  <= EXP_MAX;
                     mant_out <= QUIET_BIT;
                 end
                 
-                // Случай 3: +Inf
                 else if ((exp_in == EXP_MAX) && (mant_in == 0) && (sign_in == 0)) begin
                     is_nan       <= 1'b0;
                     is_pinf      <= 1'b1;
@@ -87,7 +79,6 @@ module special (
                     is_subnormal <= 1'b0;
                 end
                 
-                // Случай 4: -Inf
                 else if ((exp_in == EXP_MAX) && (mant_in == 0) && (sign_in == 1)) begin
                     is_nan       <= 1'b0;
                     is_pinf      <= 1'b0;
@@ -96,7 +87,6 @@ module special (
                     is_subnormal <= 1'b0;
                 end
                 
-                // Случай 5: Нормальное число
                 else if ((exp_in != 0) && (exp_in != EXP_MAX)) begin
                     is_nan       <= 1'b0;
                     is_pinf      <= 1'b0;
@@ -104,14 +94,12 @@ module special (
                     is_normal    <= 1'b1;
                     is_subnormal <= 1'b0;
                 end
-                
-                // Случай 6: Subnormal (включая ±0)
                 else begin
                     is_nan       <= 1'b0;
                     is_pinf      <= 1'b0;
                     is_ninf      <= 1'b0;
                     is_normal    <= 1'b0;
-                    is_subnormal <= (mant_in != 0);  // 0 если mant==0
+                    is_subnormal <= (mant_in != 0);  
                 end
 
                 s_valid <= 1'b1;
