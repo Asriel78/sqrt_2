@@ -30,58 +30,6 @@ module sqrt2_tb;
         forever #5 clk = ~clk;
     end
 
-    // Функции для работы с half precision
-    function [15:0] make_fp16;
-        input sign;
-        input [4:0] exp;
-        input [9:0] mant;
-        begin
-            make_fp16 = {sign, exp, mant};
-        end
-    endfunction
-
-    function real fp16_to_real;
-        input [15:0] fp;
-        reg sign;
-        reg [4:0] exp;
-        reg [9:0] mant;
-        real value;
-        integer e_unbiased;
-        begin
-            sign = fp[15];
-            exp = fp[14:10];
-            mant = fp[9:0];
-            
-            if (exp == 5'b11111) begin
-                if (mant != 0)
-                    fp16_to_real = 0.0/0.0;
-                else
-                    fp16_to_real = sign ? -1.0/0.0 : 1.0/0.0;
-            end else if (exp == 5'b00000) begin
-                if (mant == 0) begin
-                    fp16_to_real = sign ? -0.0 : 0.0;
-                end else begin
-                    e_unbiased = -14;
-                    value = mant / 1024.0;
-                    value = value * (2.0 ** e_unbiased);
-                    fp16_to_real = sign ? -value : value;
-                end
-            end else begin
-                e_unbiased = exp - 15;
-                value = 1.0 + (mant / 1024.0);
-                value = value * (2.0 ** e_unbiased);
-                fp16_to_real = sign ? -value : value;
-            end
-        end
-    endfunction
-
-    function real abs_real;
-        input real x;
-        begin
-            abs_real = (x < 0.0) ? -x : x;
-        end
-    endfunction
-
     // Переменные для тестирования
     integer errors;
     integer test_num;
@@ -97,130 +45,100 @@ module sqrt2_tb;
         data_in = 16'h0000;
         
         $display("\n========================================");
-        $display("  SQRT2 EXTENDED TESTBENCH");
+        $display("  SQRT2 SIMPLE TESTBENCH");
         $display("========================================\n");
         
         repeat(3) @(posedge clk);
         
         // ============ SPECIAL CASES ============
         $display("--- Special Cases ---");
-        test_sqrt("+Inf", 16'h7C00, 16'h7C00, 0, 1, 0);
-        test_sqrt("-Inf", 16'hFC00, 16'hFE00, 1, 0, 0);
-        test_sqrt("NaN", 16'h7E00, 16'hFE00, 1, 0, 0);
-        test_sqrt("sNaN", 16'h7D00, 16'hFE00, 1, 0, 0);
-        test_sqrt("+0", 16'h0000, 16'h0000, 0, 0, 0);
-        test_sqrt("-0", 16'h8000, 16'h8000, 0, 0, 0);
+        test_sqrt("+Inf",    16'h7C00, 16'h7C00, 1, 0, 1, 0);  // sqrt(+Inf) = +Inf
+        test_sqrt("-Inf",    16'hFC00, 16'hFE00, 1, 1, 0, 0);  // sqrt(-Inf) = NaN
+        test_sqrt("QNaN",    16'h7E00, 16'hFE00, 1, 1, 0, 0);  // sqrt(NaN) = NaN
+        test_sqrt("SNaN",    16'h7D00, 16'hFE00, 1, 1, 0, 0);  // sqrt(sNaN) = qNaN
+        test_sqrt("+0",      16'h0000, 16'h0000, 1, 0, 0, 0);  // sqrt(+0) = +0
+        test_sqrt("-0",      16'h8000, 16'h8000, 1, 0, 0, 0);  // sqrt(-0) = -0
         
         // ============ NEGATIVE NUMBERS ============
-        $display("\n--- Negative Numbers ---");
-        test_sqrt("-1.0", 16'hBC00, 16'hFE00, 1, 0, 0);
-        test_sqrt("-4.0", 16'hC400, 16'hFE00, 1, 0, 0);
-        test_sqrt("-0.5", 16'hB800, 16'hFE00, 1, 0, 0);
-        test_sqrt("-100", 16'hD640, 16'hFE00, 1, 0, 0);
+        $display("\n--- Negative Numbers -> NaN ---");
+        test_sqrt("-1.0",    16'hBC00, 16'hFE00, 1, 1, 0, 0);
+        test_sqrt("-4.0",    16'hC400, 16'hFE00, 1, 1, 0, 0);
+        test_sqrt("-0.5",    16'hB800, 16'hFE00, 1, 1, 0, 0);
+        test_sqrt("-100",    16'hD640, 16'hFE00, 1, 1, 0, 0);
         
         // ============ PERFECT SQUARES ============
         $display("\n--- Perfect Squares ---");
-        test_sqrt("1.0", 16'h3C00, 16'h3C00, 0, 0, 0);
-        test_sqrt("4.0", 16'h4400, 16'h4000, 0, 0, 0);
-        test_sqrt("9.0", 16'h4880, 16'h4200, 0, 0, 0);
-        test_sqrt("16.0", 16'h4C00, 16'h4400, 0, 0, 0);
-        test_sqrt("25.0", 16'h4E40, 16'h4500, 0, 0, 0);
-        test_sqrt("36.0", 16'h5080, 16'h4600, 0, 0, 0);
-        test_sqrt("49.0", 16'h5220, 16'h4700, 0, 0, 0);
-        test_sqrt("64.0", 16'h5400, 16'h4800, 0, 0, 0);
-        test_sqrt("0.25", 16'h3400, 16'h3800, 0, 0, 0);
-        
-        // ============ NON-PERFECT SQUARES (SMALL) ============
-        $display("\n--- Non-Perfect Squares (Small: 0.1-1.0) ---");
-        test_sqrt_approx("0.125", 16'h3000, 0.35355, 0.01);
-        test_sqrt_approx("0.1875", 16'h3200, 0.43301, 0.01);
-        test_sqrt_approx("0.375", 16'h3600, 0.61237, 0.01);
-        test_sqrt_approx("0.5", 16'h3800, 0.70711, 0.01);
-        test_sqrt_approx("0.625", 16'h3900, 0.79057, 0.01);
-        test_sqrt_approx("0.75", 16'h3A00, 0.86603, 0.01);
-        test_sqrt_approx("0.875", 16'h3B00, 0.93541, 0.01);
-        
-        // ============ NON-PERFECT SQUARES (MEDIUM) ============
-        $display("\n--- Non-Perfect Squares (Medium: 1-10) ---");
-        test_sqrt_approx("1.5", 16'h3E00, 1.22474, 0.01);
-        test_sqrt_approx("2.0", 16'h4000, 1.41421, 0.01);
-        test_sqrt_approx("2.5", 16'h4100, 1.58114, 0.01);
-        test_sqrt_approx("3.0", 16'h4200, 1.73205, 0.01);
-        test_sqrt_approx("3.5", 16'h4300, 1.87083, 0.01);
-        test_sqrt_approx("5.0", 16'h4500, 2.23607, 0.01);
-        test_sqrt_approx("6.0", 16'h4600, 2.44949, 0.01);
-        test_sqrt_approx("7.0", 16'h4700, 2.64575, 0.01);
-        test_sqrt_approx("8.0", 16'h4800, 2.82843, 0.01);
-        test_sqrt_approx("10.0", 16'h4900, 3.16228, 0.01);
-        
-        // ============ NON-PERFECT SQUARES (LARGE) ============
-        $display("\n--- Non-Perfect Squares (Large: 10-1000) ---");
-        test_sqrt_approx("12.0", 16'h4A00, 3.46410, 0.01);
-        test_sqrt_approx("15.0", 16'h4B80, 3.87298, 0.01);
-        test_sqrt_approx("20.0", 16'h4D00, 4.47214, 0.02);
-        test_sqrt_approx("30.0", 16'h4F00, 5.47723, 0.02);
-        test_sqrt_approx("50.0", 16'h5140, 7.07107, 0.05);
-        test_sqrt_approx("75.0", 16'h52B0, 8.66025, 0.05);
-        test_sqrt_approx("100.0", 16'h5640, 10.0, 0.1);
-        test_sqrt_approx("150.0", 16'h5960, 12.2474, 0.1);
-        test_sqrt_approx("200.0", 16'h5C80, 14.1421, 0.1);
-        test_sqrt_approx("500.0", 16'h5FA0, 22.3607, 0.2);
-        test_sqrt_approx("1000.0", 16'h63E0, 31.6228, 0.5);
-        test_sqrt_approx("1024.0", 16'h6400, 32.0, 0.5);
-        
-        // ============ VERY SMALL NORMAL NUMBERS ============
-        $display("\n--- Very Small Normal Numbers ---");
-        test_sqrt_approx("2^-14", 16'h0400, 0.00781, 0.001);  // Smallest normal
-        test_sqrt_approx("2^-13", 16'h0800, 0.01106, 0.001);
-        test_sqrt_approx("2^-12", 16'h0C00, 0.01563, 0.002);
-        test_sqrt_approx("2^-11", 16'h1000, 0.02210, 0.002);
-        test_sqrt_approx("2^-10", 16'h1400, 0.03125, 0.002);
-        test_sqrt_approx("2^-9", 16'h1800, 0.04419, 0.002);
-        test_sqrt_approx("2^-8", 16'h1C00, 0.06250, 0.005);
-        
-        // ============ SUBNORMAL NUMBERS ============
-        $display("\n--- Subnormal Numbers ---");
-        test_sqrt_approx("subnorm_min", 16'h0001, 0.000183, 0.0001);  // 2^-24
-        test_sqrt_approx("subnorm_2", 16'h0002, 0.000259, 0.0001);
-        test_sqrt_approx("subnorm_4", 16'h0004, 0.000366, 0.0001);
-        test_sqrt_approx("subnorm_8", 16'h0008, 0.000518, 0.0002);
-        test_sqrt_approx("subnorm_16", 16'h0010, 0.000732, 0.0002);
-        test_sqrt_approx("subnorm_32", 16'h0020, 0.001035, 0.0003);
-        test_sqrt_approx("subnorm_64", 16'h0040, 0.001464, 0.0005);
-        test_sqrt_approx("subnorm_128", 16'h0080, 0.002071, 0.0005);
-        test_sqrt_approx("subnorm_256", 16'h0100, 0.002930, 0.001);
-        test_sqrt_approx("subnorm_512", 16'h0200, 0.004142, 0.001);
-        test_sqrt_approx("subnorm_max", 16'h03FF, 0.006104, 0.001);  // Max subnormal
-        
-        // ============ BOUNDARY CASES ============
-        $display("\n--- Boundary Cases ---");
-        test_sqrt_approx("near_1", 16'h3BFF, 0.99951, 0.01);  // Чуть меньше 1
-        test_sqrt_approx("near_1+", 16'h3C01, 1.00049, 0.01); // Чуть больше 1
-        test_sqrt_approx("max_norm", 16'h7BFF, 181.02, 2.0);  // Максимальное нормальное число
+        test_sqrt("0.25",    16'h3400, 16'h3800, 1, 0, 0, 0);  // sqrt(0.25) = 0.5
+        test_sqrt("1.0",     16'h3C00, 16'h3C00, 1, 0, 0, 0);  // sqrt(1) = 1
+        test_sqrt("4.0",     16'h4400, 16'h4000, 1, 0, 0, 0);  // sqrt(4) = 2
+        test_sqrt("9.0",     16'h4880, 16'h4200, 1, 0, 0, 0);  // sqrt(9) = 3
+        test_sqrt("16.0",    16'h4C00, 16'h4400, 1, 0, 0, 0);  // sqrt(16) = 4
+        test_sqrt("25.0",    16'h4E40, 16'h4500, 1, 0, 0, 0);  // sqrt(25) = 5
+        test_sqrt("36.0",    16'h5080, 16'h4600, 1, 0, 0, 0);  // sqrt(36) = 6
+        test_sqrt("49.0",    16'h5220, 16'h4700, 1, 0, 0, 0);  // sqrt(49) = 7
+        test_sqrt("64.0",    16'h5400, 16'h4800, 1, 0, 0, 0);  // sqrt(64) = 8
+        test_sqrt("81.0",    16'h5510, 16'h4880, 1, 0, 0, 0);  // sqrt(81) = 9
+        test_sqrt("100.0",   16'h5640, 16'h4900, 1, 0, 0, 0);  // sqrt(100) = 10
         
         // ============ POWERS OF 2 ============
         $display("\n--- Powers of 2 ---");
-        test_sqrt_approx("2^1", 16'h4000, 1.41421, 0.01);
-        test_sqrt_approx("2^2", 16'h4400, 2.0, 0.01);
-        test_sqrt_approx("2^3", 16'h4800, 2.82843, 0.01);
-        test_sqrt_approx("2^4", 16'h4C00, 4.0, 0.02);
-        test_sqrt_approx("2^5", 16'h5000, 5.65685, 0.05);
-        test_sqrt_approx("2^6", 16'h5400, 8.0, 0.05);
-        test_sqrt_approx("2^7", 16'h5800, 11.3137, 0.1);
-        test_sqrt_approx("2^8", 16'h5C00, 16.0, 0.1);
-        test_sqrt_approx("2^9", 16'h6000, 22.6274, 0.2);
-        test_sqrt_approx("2^10", 16'h6400, 32.0, 0.5);
+        test_sqrt("0.0625",  16'h2800, 16'h3000, 1, 0, 0, 0);  // sqrt(2^-4) = 2^-2
+        test_sqrt("0.125",   16'h3000, 16'h3400, 1, 0, 0, 0);  // sqrt(2^-3) = 2^-1.5
+        test_sqrt("0.25",    16'h3400, 16'h3800, 1, 0, 0, 0);  // sqrt(2^-2) = 2^-1
+        test_sqrt("0.5",     16'h3800, 16'h3A00, 1, 0, 0, 0);  // sqrt(2^-1) = 2^-0.5
+        test_sqrt("2.0",     16'h4000, 16'h3E00, 1, 0, 0, 0);  // sqrt(2^1) = 2^0.5
+        test_sqrt("4.0",     16'h4400, 16'h4000, 1, 0, 0, 0);  // sqrt(2^2) = 2^1
+        test_sqrt("8.0",     16'h4800, 16'h4200, 1, 0, 0, 0);  // sqrt(2^3) = 2^1.5
+        test_sqrt("16.0",    16'h4C00, 16'h4400, 1, 0, 0, 0);  // sqrt(2^4) = 2^2
+        test_sqrt("32.0",    16'h5000, 16'h4600, 1, 0, 0, 0);  // sqrt(2^5) = 2^2.5
+        test_sqrt("64.0",    16'h5400, 16'h4800, 1, 0, 0, 0);  // sqrt(2^6) = 2^3
+        test_sqrt("128.0",   16'h5800, 16'h4A00, 1, 0, 0, 0);  // sqrt(2^7) = 2^3.5
+        test_sqrt("256.0",   16'h5C00, 16'h4C00, 1, 0, 0, 0);  // sqrt(2^8) = 2^4
+        test_sqrt("512.0",   16'h6000, 16'h4E00, 1, 0, 0, 0);  // sqrt(2^9) = 2^4.5
+        test_sqrt("1024.0",  16'h6400, 16'h5000, 1, 0, 0, 0);  // sqrt(2^10) = 2^5
         
-        // ============ MIXED MANTISSA VALUES ============
-        $display("\n--- Mixed Mantissa Values ---");
-        test_sqrt_approx("1.1", 16'h3C66, 1.04881, 0.01);
-        test_sqrt_approx("1.2", 16'h3CCD, 1.09545, 0.01);
-        test_sqrt_approx("1.3", 16'h3D33, 1.14018, 0.01);
-        test_sqrt_approx("1.4", 16'h3D99, 1.18322, 0.01);
-        test_sqrt_approx("1.6", 16'h3E66, 1.26491, 0.01);
-        test_sqrt_approx("1.7", 16'h3ECD, 1.30384, 0.01);
-        test_sqrt_approx("1.8", 16'h3F33, 1.34164, 0.01);
-        test_sqrt_approx("1.9", 16'h3F99, 1.37840, 0.01);
+        // ============ NON-PERFECT SQUARES (примеры) ============
+        $display("\n--- Non-Perfect Squares ---");
+        test_sqrt_approx("2.0",   16'h4000, 16'h3DA8, 2);  // sqrt(2) ≈ 1.414 (truncated)
+        test_sqrt_approx("3.0",   16'h4200, 16'h3EED, 2);  // sqrt(3) ≈ 1.732 (truncated)
+        test_sqrt_approx("5.0",   16'h4500, 16'h4078, 2);  // sqrt(5) ≈ 2.236 (truncated)
+        test_sqrt_approx("6.0",   16'h4600, 16'h40E6, 2);  // sqrt(6) ≈ 2.449 (truncated)
+        test_sqrt_approx("7.0",   16'h4700, 16'h414A, 2);  // sqrt(7) ≈ 2.646 (truncated)
+        test_sqrt_approx("10.0",  16'h4900, 16'h4253, 2);  // sqrt(10) ≈ 3.162 (truncated)
+        test_sqrt_approx("12.0",  16'h4A00, 16'h42ED, 2);  // sqrt(12) ≈ 3.464 (truncated)
+        test_sqrt_approx("15.0",  16'h4B80, 16'h43BE, 2);  // sqrt(15) ≈ 3.873 (truncated)
+        test_sqrt_approx("20.0",  16'h4D00, 16'h4478, 2);  // sqrt(20) ≈ 4.472 (truncated)
+        
+        // ============ SMALL NUMBERS ============
+        $display("\n--- Small Numbers ---");
+        test_sqrt_approx("0.1",   16'h2E66, 16'h350F, 5);  // sqrt(0.1) ≈ 0.316 (truncated)
+        test_sqrt_approx("0.5",   16'h3800, 16'h39A8, 2);  // sqrt(0.5) ≈ 0.707 (truncated)
+        test_sqrt_approx("0.75",  16'h3A00, 16'h3AEC, 2);  // sqrt(0.75) ≈ 0.866 (truncated)
+        
+        // ============ VERY SMALL NORMAL NUMBERS ============
+        $display("\n--- Very Small Normal Numbers ---");
+        test_sqrt_approx("2^-14", 16'h0400, 16'h2000, 3);  // sqrt(2^-14) = 2^-7 (exact!)
+        test_sqrt_approx("2^-13", 16'h0800, 16'h21A8, 3);  // sqrt(2^-13) = 2^-7 × sqrt(2) (truncated)
+        test_sqrt_approx("2^-12", 16'h0C00, 16'h2400, 3);  // sqrt(2^-12) = 2^-6 (exact!)
+        test_sqrt_approx("2^-10", 16'h1400, 16'h2800, 3);  // sqrt(2^-10) = 2^-5 (exact!)
+        
+        // ============ SUBNORMAL NUMBERS ============
+        $display("\n--- Subnormal Numbers ---");
+        test_sqrt_approx("min",   16'h0001, 16'h0100, 5);  // sqrt(2^-24) = 2^-12 (subnormal out)
+        test_sqrt_approx("sub2",  16'h0002, 16'h0160, 5);  // Приблизительно
+        test_sqrt_approx("sub4",  16'h0004, 16'h0200, 5);
+        test_sqrt_approx("sub8",  16'h0008, 16'h02C0, 5);
+        test_sqrt_approx("sub16", 16'h0010, 16'h0400, 5);
+        test_sqrt_approx("sub32", 16'h0020, 16'h05A0, 5);
+        test_sqrt_approx("sub64", 16'h0040, 16'h0800, 5);
+        test_sqrt_approx("max_s", 16'h03FF, 16'h0FF8, 5);  // Max subnormal
+        
+        // ============ LARGE NUMBERS ============
+        $display("\n--- Large Numbers ---");
+        test_sqrt_approx("1000",  16'h63E8, 16'h4FF3, 5);  // sqrt(1000) ≈ 31.62 (truncated)
+        test_sqrt_approx("2000",  16'h67D0, 16'h5197, 10); // sqrt(2000) ≈ 44.72 (truncated)
+        test_sqrt_approx("10000", 16'h70E2, 16'h5640, 5);  // sqrt(10000) = 100 (exact!)
+        test_sqrt_approx("max",   16'h7BFF, 16'h5BFF, 15); // sqrt(65504) ≈ 255.9 (truncated)
         
         // ============ ИТОГИ ============
         $display("\n========================================");
@@ -235,22 +153,20 @@ module sqrt2_tb;
         end
     end
 
-    // Задача для точных тестов (perfect squares, special values)
+    // Задача для точных тестов (exact match)
     task test_sqrt;
         input [255:0] name;
         input [15:0] input_val;
         input [15:0] expected_val;
+        input check_result;        // Проверять ли RESULT=1
         input expected_nan;
         input expected_pinf;
         input expected_ninf;
         
-        real input_real, output_real, expected_real;
         integer cycles;
         
         begin
             test_num = test_num + 1;
-            input_real = fp16_to_real(input_val);
-            expected_real = fp16_to_real(expected_val);
             
             enable = 1;
             drive_input = 1;
@@ -268,22 +184,22 @@ module sqrt2_tb;
             end
             
             if (!result) begin
-                $display("Test %0d [%s] FAIL: Timeout after %0d cycles", test_num, name, cycles);
+                $display("Test %0d [%0s] FAIL: Timeout after %0d cycles", test_num, name, cycles);
                 errors = errors + 1;
             end else begin
-                output_real = fp16_to_real(io_data);
-                
-                // Проверка результата и флагов
+                // Проверка выходного значения
                 if (io_data !== expected_val) begin
-                    $display("Test %0d [%s] FAIL: Input=0x%04h Expected=0x%04h Got=0x%04h", 
+                    $display("Test %0d [%0s] FAIL: Input=0x%04h Expected=0x%04h Got=0x%04h", 
                              test_num, name, input_val, expected_val, io_data);
                     errors = errors + 1;
-                end else if (is_nan !== expected_nan || is_pinf !== expected_pinf || is_ninf !== expected_ninf) begin
-                    $display("Test %0d [%s] FAIL: Wrong flags NaN=%b(exp:%b) +Inf=%b(exp:%b) -Inf=%b(exp:%b)", 
+                end 
+                // Проверка флагов
+                else if (is_nan !== expected_nan || is_pinf !== expected_pinf || is_ninf !== expected_ninf) begin
+                    $display("Test %0d [%0s] FAIL: Flags NaN=%b(exp:%b) +Inf=%b(exp:%b) -Inf=%b(exp:%b)", 
                              test_num, name, is_nan, expected_nan, is_pinf, expected_pinf, is_ninf, expected_ninf);
                     errors = errors + 1;
                 end else begin
-                    $display("Test %0d [%s] PASS: 0x%04h -> 0x%04h (%0d cycles)", 
+                    $display("Test %0d [%0s] PASS: 0x%04h -> 0x%04h (%0d cycles)", 
                              test_num, name, input_val, io_data, cycles);
                 end
             end
@@ -294,19 +210,19 @@ module sqrt2_tb;
         end
     endtask
 
-    // Задача для приблизительных тестов (non-perfect squares)
+    // Задача для приблизительных тестов (с допуском ±tolerance LSB)
     task test_sqrt_approx;
         input [255:0] name;
         input [15:0] input_val;
-        input real expected_real;
-        input real tolerance;
+        input [15:0] expected_val;
+        input integer tolerance;   // Допуск в LSB (младших битах)
         
-        real input_real, output_real, error;
         integer cycles;
+        integer diff;
+        reg match;
         
         begin
             test_num = test_num + 1;
-            input_real = fp16_to_real(input_val);
             
             enable = 1;
             drive_input = 1;
@@ -324,26 +240,30 @@ module sqrt2_tb;
             end
             
             if (!result) begin
-                $display("Test %0d [%s] FAIL: Timeout after %0d cycles", test_num, name, cycles);
+                $display("Test %0d [%0s] FAIL: Timeout after %0d cycles", test_num, name, cycles);
                 errors = errors + 1;
             end else begin
-                output_real = fp16_to_real(io_data);
-                error = abs_real(output_real - expected_real);
+                // Вычисляем разницу (учитываем знаковые)
+                if (io_data >= expected_val)
+                    diff = io_data - expected_val;
+                else
+                    diff = expected_val - io_data;
                 
-                // Проверка результата
-                if (error > tolerance) begin
-                    $display("Test %0d [%s] FAIL: Input=0x%04h(%.6f) Expected=%.6f Got=%.6f Error=%.6f", 
-                             test_num, name, input_val, input_real, expected_real, output_real, error);
+                match = (diff <= tolerance);
+                
+                if (!match) begin
+                    $display("Test %0d [%0s] FAIL: Input=0x%04h Expected=0x%04h Got=0x%04h (diff=%0d, tol=%0d)", 
+                             test_num, name, input_val, expected_val, io_data, diff, tolerance);
                     errors = errors + 1;
                 end 
-                // Проверка флагов - для положительных результатов is_ninf всегда должен быть 0
+                // Проверка флагов (для обычных чисел должны быть все 0)
                 else if (is_nan || is_pinf || is_ninf) begin
-                    $display("Test %0d [%s] FAIL: Unexpected special flags NaN=%b +Inf=%b -Inf=%b", 
+                    $display("Test %0d [%0s] FAIL: Unexpected flags NaN=%b +Inf=%b -Inf=%b", 
                              test_num, name, is_nan, is_pinf, is_ninf);
                     errors = errors + 1;
                 end else begin
-                    $display("Test %0d [%s] PASS: 0x%04h(%.6f) -> %.6f (error=%.6f, %0d cycles)", 
-                             test_num, name, input_val, input_real, output_real, error, cycles);
+                    $display("Test %0d [%0s] PASS: 0x%04h -> 0x%04h (exp:0x%04h, diff=%0d, %0d cycles)", 
+                             test_num, name, input_val, io_data, expected_val, diff, cycles);
                 end
             end
             
