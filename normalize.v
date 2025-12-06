@@ -61,41 +61,36 @@ module normalize (
             n_valid <= 1'b0;
 
             if (s_valid) begin
-                // Проверка на ±0 в начале
                 if (is_zero) begin
-                    // ±0 - это число со специальным представлением
                     is_num   <= 1'b1;
                     is_nan   <= 1'b0;
                     is_pinf  <= 1'b0;
                     is_ninf  <= 1'b0;
-                    sign_out <= sign_in;  // сохраняем знак ±0
-                    exp_out  <= -7'sd15;  // минимальная экспонента
+                    sign_out <= sign_in;  
+                    exp_out  <= -7'sd15; 
                     mant_out <= 11'd0;
                 end
-                // Normal числа
                 else if (is_normal_in) begin
                     is_num   <= 1'b1;
                     is_nan   <= 1'b0;
                     is_pinf  <= 1'b0;
                     is_ninf  <= 1'b0;
                     sign_out <= sign_in;
-                    mant_out <= {1'b1, mant_in};  // добавляем implicit bit
+                    mant_out <= {1'b1, mant_in};  
                     exp_out  <= $signed({2'b00, exp_in}) - BIAS;
                 end 
-                // Subnormal числа
+                
                 else if (is_subnormal_in) begin
                     is_num   <= 1'b1;
                     is_nan   <= 1'b0;
                     is_pinf  <= 1'b0;
                     is_ninf  <= 1'b0;
                     sign_out <= sign_in;
-                    // Нормализуем через CLZ
                     tmp_m   = ({1'b0, mant_in} << (clz_comb + 1));
                     tmp_exp = $signed(7'sd0) - BIAS - $signed({3'b000, clz_comb});
                     mant_out <= tmp_m;
                     exp_out  <= tmp_exp;
                 end 
-                // Special значения (NaN, ±Inf)
                 else begin
                     is_num   <= 1'b0;
                     is_nan   <= is_nan_in;
