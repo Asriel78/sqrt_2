@@ -9,13 +9,15 @@
 `include "pack.v"
 `include "sqrt2_b.sv"
 `elsif STRUCTURAL
+`include "basic_modules.v"
 `include "load_s.v"
 `include "special_s.v"
 `include "normalize_s.v"
 `include "iterate_s.v"
 `include "pack_s.v"
 `include "sqrt2_s.sv"
-`error "!mode"
+`else
+`error "No mode defined! Use -D BEHAVIOUR or -D STRUCTURAL"
 `endif
 
 
