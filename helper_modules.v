@@ -154,72 +154,75 @@ endmodule
 
 
 module fp16_special_handler (
-    input  wire        sign_in,
-    input  wire [4:0]  exp_in,
-    input  wire [9:0]  mant_in,
-    
-    input  wire        is_zero_detected,
-    input  wire        is_nan_detected,
-    input  wire        is_inf_detected,
-    
-    output wire        is_nan_out,
-    output wire        is_pinf_out,
-    output wire        is_ninf_out,
-    
-    output wire        sign_out,
-    output wire [4:0]  exp_out,
-    output wire [9:0]  mant_out
+    input wire        sign_in,
+    input wire [4:0]  exp_in,
+    input wire [9:0]  mant_in,
+   
+    input wire        is_zero_detected,
+    input wire        is_nan_detected,
+    input wire        is_inf_detected,
+   
+    output wire       is_nan_out,
+    output wire       is_pinf_out,
+    output wire       is_ninf_out,
+   
+    output wire       sign_out,
+    output wire [4:0] exp_out,
+    output wire [9:0] mant_out
 );
-    wire not_zero, not_inf, is_nonzero_finite, is_negative_number;
+    wire not_zero, not_inf, is_nonzero_finite, is_invalid_op;
     wire sign_in_n;
-    
+   
     not(not_zero, is_zero_detected);
-    not(not_inf, is_inf_detected);
+    not(not_inf , is_inf_detected);
     and(is_nonzero_finite, not_zero, not_inf);
-    and(is_negative_number, sign_in, is_nonzero_finite);
-    
-    or(is_nan_out, is_nan_detected, is_negative_number);
-    
+    and(is_invalid_op, sign_in, is_nonzero_finite);
+   
+    or(is_nan_out, is_nan_detected, is_invalid_op);
+   
     not(sign_in_n, sign_in);
     and(is_pinf_out, is_inf_detected, sign_in_n);
     and(is_ninf_out, is_inf_detected, sign_in);
-    
-    wire [9:0] mant_with_quiet, nan_mantissa;
-    wire nan_sign;
-    
+   
+    wire force_canonical_qnan;
+    assign force_canonical_qnan = is_invalid_op;
+   
+    wire [9:0] mant_with_quiet;
     assign mant_with_quiet = mant_in | 10'b1000000000;
-    
-    mux2_n #(.WIDTH(10)) nan_mant_select(
-        .a(10'b1000000000),
-        .b(mant_with_quiet),
-        .sel(is_nan_detected),
-        .out(nan_mantissa)
+   
+    wire [9:0] selected_mant;
+    mux2_n #(.WIDTH(10)) mant_sel(
+        .a(mant_with_quiet),
+        .b(10'b1000000000),
+        .sel(force_canonical_qnan),
+        .out(selected_mant)
     );
-    
-    mux2 nan_sign_select(
-        .a(1'b1),
-        .b(sign_in),
-        .sel(is_nan_detected),
-        .out(nan_sign)
+   
+    wire selected_sign;
+    mux2 sign_sel(
+        .a(sign_in),
+        .b(1'b1),
+        .sel(force_canonical_qnan),
+        .out(selected_sign)
     );
-    
-    mux2_n #(.WIDTH(5)) exp_final_mux(
+   
+    mux2_n #(.WIDTH(5)) exp_mux(
         .a(exp_in),
         .b(5'b11111),
         .sel(is_nan_out),
         .out(exp_out)
     );
-    
-    mux2_n #(.WIDTH(10)) mant_final_mux(
+   
+    mux2_n #(.WIDTH(10)) mant_mux(
         .a(mant_in),
-        .b(nan_mantissa),
+        .b(selected_mant),
         .sel(is_nan_out),
         .out(mant_out)
     );
-    
-    mux2 sign_final_mux(
+   
+    mux2 sign_mux(
         .a(sign_in),
-        .b(nan_sign),
+        .b(selected_sign),
         .sel(is_nan_out),
         .out(sign_out)
     );
@@ -496,7 +499,8 @@ module fp16_packer (
     wire [15:0] non_zero_value, number_value;
     wire is_any_special;
     
-    assign nan_pattern = 16'hFE00;
+    // NaN сохраняет sign и mantissa (с quiet bit уже установленным в iterate)
+    assign nan_pattern = {sign_in, 5'b11111, mant_in[9:0]};
     assign pinf_pattern = 16'h7C00;
     
     mux2_n #(.WIDTH(16)) special_mux(

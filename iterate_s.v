@@ -192,8 +192,9 @@ module iterate (
     and(sign_for_special, start_trigger, is_special_input);
     and(sign_for_compute, start_trigger, not_zero, not_special);
     
+    // Для NaN сохраняем sign_in, для -Inf используем 1
     wire sign_special_value;
-    mux2 sign_spec_mux(.a(1'b0), .b(1'b1), .sel(is_nan_or_ninf), .out(sign_special_value));
+    mux2 sign_spec_mux(.a(sign_in), .b(1'b1), .sel(is_ninf_in), .out(sign_special_value));
     
     wire sign_choice1, sign_choice2, sign_next;
     mux2 sign_m1(.a(sign_out), .b(sign_in), .sel(sign_for_zero), .out(sign_choice1));
@@ -208,8 +209,10 @@ module iterate (
     mux2_n #(.WIDTH(7)) exp_m3(.a(exp_choice2), .b(exp_halved), .sel(sign_for_compute), .out(exp_next));
     
     wire [10:0] mant_for_zero = 11'd0;
+    // Для NaN сохраняем mant_in, для -Inf используем 11'b11000000000 (quiet bit в [9])
+    wire [10:0] mant_for_ninf = 11'b11000000000;
     wire [10:0] mant_for_special;
-    mux2_n #(.WIDTH(11)) mant_spec_mux(.a(11'd0), .b(11'b10000000000), .sel(is_nan_or_ninf), .out(mant_for_special));
+    mux2_n #(.WIDTH(11)) mant_spec_mux(.a(mant_in), .b(mant_for_ninf), .sel(is_ninf_in), .out(mant_for_special));
     
     wire [10:0] mant_choice1, mant_choice2, mant_choice3, mant_next;
     mux2_n #(.WIDTH(11)) mant_m1(.a(mant_out), .b(mant_for_zero), .sel(sign_for_zero), .out(mant_choice1));

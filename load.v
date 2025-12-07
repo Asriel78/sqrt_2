@@ -11,6 +11,14 @@ module load(
 
     reg prev_enable;
 
+    initial begin
+        prev_enable = 1'b0;
+        valid = 1'b0;
+        sign = 1'b0;
+        exp = 5'd0;
+        mant = 10'd0;
+    end
+
     always @(posedge clk) begin
         if (!enable) begin
             prev_enable <= 1'b0;

@@ -38,6 +38,11 @@ module iterate (
     reg stored_is_nan;
     reg stored_is_pinf;
     reg stored_is_ninf;
+    reg stored_sign;
+    reg signed [6:0] stored_exp;
+    reg [10:0] stored_mant;
+    reg done;
+    
     wire [22:0] trial_comb;
     wire [22:0] remainder_next;
     wire [11:0] root_next;
@@ -51,6 +56,30 @@ module iterate (
     wire is_zero;
     
     assign is_zero = (exp_in == -7'sd15) && (mant_in == 11'd0);
+
+    initial begin
+        active = 1'b0;
+        it_valid = 1'b0;
+        result = 1'b0;
+        sign_out = 1'b0;
+        exp_out = 7'sd0;
+        mant_out = 11'd0;
+        iter_left = 4'd0;
+        radicand = 34'd0;
+        remainder = 23'd0;
+        root = 12'd0;
+        is_special = 1'b0;
+        stored_is_nan = 1'b0;
+        stored_is_pinf = 1'b0;
+        stored_is_ninf = 1'b0;
+        stored_sign = 1'b0;
+        stored_exp = 7'sd0;
+        stored_mant = 11'd0;
+        is_nan_out = 1'b0;
+        is_pinf_out = 1'b0;
+        is_ninf_out = 1'b0;
+        done = 1'b0;
+    end
 
     always @(posedge clk) begin
         if (!enable) begin
@@ -68,132 +97,166 @@ module iterate (
             stored_is_nan  <= 1'b0;
             stored_is_pinf <= 1'b0;
             stored_is_ninf <= 1'b0;
+            stored_sign    <= 1'b0;
+            stored_exp     <= 7'sd0;
+            stored_mant    <= 11'd0;
             is_nan_out  <= 1'b0;
             is_pinf_out <= 1'b0;
             is_ninf_out <= 1'b0;
+            done <= 1'b0;
         end else begin
-            it_valid <= 1'b0;
-            result   <= 1'b0;
-
-            if (n_valid && !active) begin
-                if (is_zero) begin
-                    it_valid <= 1'b1;
-                    result   <= 1'b1;
-                    active   <= 1'b0;
-                    is_special <= 1'b1;
-                    
-                    stored_is_nan  <= 1'b0;
-                    stored_is_pinf <= 1'b0;
-                    stored_is_ninf <= 1'b0;
-                    
-                    is_nan_out  <= 1'b0;
-                    is_pinf_out <= 1'b0;
-                    is_ninf_out <= 1'b0;
-                    
-                    sign_out <= sign_in; 
-                    exp_out  <= -7'sd15;
-                    mant_out <= 11'd0;
-                end
-                else if (!is_num || is_nan_in || is_pinf_in || is_ninf_in) begin
-                    it_valid <= 1'b1;
-                    result   <= 1'b1;
-                    active   <= 1'b0;
-                    is_special <= 1'b1;
-            
-                    stored_is_nan  <= is_nan_in;
-                    stored_is_pinf <= is_pinf_in;
-                    stored_is_ninf <= is_ninf_in;
-                    
-                    is_nan_out  <= is_nan_in;
-                    is_pinf_out <= is_pinf_in;
-                    is_ninf_out <= is_ninf_in;
-                    
-                    if (is_nan_in) begin
-                        sign_out <= 1'b1;
-                        exp_out  <= 7'sd16;
-                        mant_out <= 11'b10000000000;
-                    end else if (is_pinf_in) begin
-                        sign_out <= 1'b0;
-                        exp_out  <= 7'sd16;
-                        mant_out <= 11'd0;
-                    end else if (is_ninf_in) begin
-                        sign_out <= 1'b1;
-                        exp_out  <= 7'sd16;
-                        mant_out <= 11'b10000000000;
-                        stored_is_nan  <= 1'b1;
-                        stored_is_pinf <= 1'b0;
-                        stored_is_ninf <= 1'b0;
-                        is_nan_out  <= 1'b1;
-                        is_pinf_out <= 1'b0;
-                        is_ninf_out <= 1'b0;
-                    end else begin
-                        sign_out <= 1'b1;
-                        exp_out  <= 7'sd16;
-                        mant_out <= 11'b10000000000;
-                    end
-                end 
-                else begin
-                    is_special <= 1'b0;
-                    stored_is_nan  <= 1'b0;
-                    stored_is_pinf <= 1'b0;
-                    stored_is_ninf <= 1'b0;
-                    is_nan_out  <= 1'b0;
-                    is_pinf_out <= 1'b0;
-                    is_ninf_out <= 1'b0;
-                    
-                    sign_out <= 1'b0;  
-                    
-
-                    if (exp_in[0]) begin
-                        work_mant = {mant_in, 1'b0}; 
-                        work_exp  = exp_in - 7'sd1;  
-                    end else begin
-                        work_mant = mant_in;
-                        work_exp  = exp_in;
-                    end
-                    
-                    exp_out <= {work_exp[6], work_exp[6:1]};
-                    
-                    radicand  <= {work_mant, 22'd0};
-                    remainder <= 23'd0;
-                    root      <= 12'd0;
-                    iter_left <= ITER_MAX;
-                    active    <= 1'b1;
-                end
-            end
-            
-            if (active) begin
-                radicand <= {radicand[31:0], 2'b00};
-                
-                remainder <= (remainder_next >= trial_comb) ? 
-                             (remainder_next - trial_comb) : 
-                             remainder_next;
-                root      <= root_next;
-                
+            if (done) begin
                 it_valid <= 1'b1;
-            
-                is_nan_out  <= 1'b0;
-                is_pinf_out <= 1'b0;
-                is_ninf_out <= 1'b0;
-                
-                if (iter_left > 4'd1)
-                    mant_out <= root_next[10:0] << (iter_left - 4'd1);
-                else
-                    mant_out <= root_next[10:0];
-                
-                if (iter_left == 4'd1) begin
-                    result    <= 1'b1;
-                    active    <= 1'b0;
-                    iter_left <= 4'd0;
-                end else begin
-                    iter_left <= iter_left - 4'd1;
-                end
-            end
-            
-            if (is_special && !active) begin
+                result   <= 1'b1;
                 is_nan_out  <= stored_is_nan;
                 is_pinf_out <= stored_is_pinf;
                 is_ninf_out <= stored_is_ninf;
+                sign_out <= stored_sign;
+                exp_out  <= stored_exp;
+                mant_out <= stored_mant;
+            end else begin
+                it_valid <= 1'b0;
+                result   <= 1'b0;
+
+                if (n_valid && !active) begin
+                    if (is_zero) begin
+                        it_valid <= 1'b1;
+                        result   <= 1'b1;
+                        active   <= 1'b0;
+                        is_special <= 1'b1;
+                        done <= 1'b1;
+                        
+                        stored_is_nan  <= 1'b0;
+                        stored_is_pinf <= 1'b0;
+                        stored_is_ninf <= 1'b0;
+                        
+                        is_nan_out  <= 1'b0;
+                        is_pinf_out <= 1'b0;
+                        is_ninf_out <= 1'b0;
+                        
+                        stored_sign <= sign_in;
+                        stored_exp  <= -7'sd15;
+                        stored_mant <= 11'd0;
+                        
+                        sign_out <= sign_in; 
+                        exp_out  <= -7'sd15;
+                        mant_out <= 11'd0;
+                    end
+                    else if (!is_num || is_nan_in || is_pinf_in || is_ninf_in) begin
+                        it_valid <= 1'b1;
+                        result   <= 1'b1;
+                        active   <= 1'b0;
+                        is_special <= 1'b1;
+                        done <= 1'b1;
+                
+                        stored_is_nan  <= is_nan_in;
+                        stored_is_pinf <= is_pinf_in;
+                        stored_is_ninf <= is_ninf_in;
+                        
+                        is_nan_out  <= is_nan_in;
+                        is_pinf_out <= is_pinf_in;
+                        is_ninf_out <= is_ninf_in;
+                        
+                        if (is_nan_in) begin
+                            stored_sign <= 1'b1;
+                            stored_exp  <= 7'sd16;
+                            stored_mant <= 11'b10000000000;
+                            sign_out <= 1'b1;
+                            exp_out  <= 7'sd16;
+                            mant_out <= 11'b10000000000;
+                        end else if (is_pinf_in) begin
+                            stored_sign <= 1'b0;
+                            stored_exp  <= 7'sd16;
+                            stored_mant <= 11'd0;
+                            sign_out <= 1'b0;
+                            exp_out  <= 7'sd16;
+                            mant_out <= 11'd0;
+                        end else if (is_ninf_in) begin
+                            stored_sign <= 1'b1;
+                            stored_exp  <= 7'sd16;
+                            stored_mant <= 11'b10000000000;
+                            stored_is_nan  <= 1'b1;
+                            stored_is_pinf <= 1'b0;
+                            stored_is_ninf <= 1'b0;
+                            is_nan_out  <= 1'b1;
+                            is_pinf_out <= 1'b0;
+                            is_ninf_out <= 1'b0;
+                            sign_out <= 1'b1;
+                            exp_out  <= 7'sd16;
+                            mant_out <= 11'b10000000000;
+                        end else begin
+                            stored_sign <= 1'b1;
+                            stored_exp  <= 7'sd16;
+                            stored_mant <= 11'b10000000000;
+                            sign_out <= 1'b1;
+                            exp_out  <= 7'sd16;
+                            mant_out <= 11'b10000000000;
+                        end
+                    end 
+                    else begin
+                        is_special <= 1'b0;
+                        stored_is_nan  <= 1'b0;
+                        stored_is_pinf <= 1'b0;
+                        stored_is_ninf <= 1'b0;
+                        is_nan_out  <= 1'b0;
+                        is_pinf_out <= 1'b0;
+                        is_ninf_out <= 1'b0;
+                        
+                        sign_out <= 1'b0;  
+                        
+                        if (exp_in[0]) begin
+                            work_mant = {mant_in, 1'b0}; 
+                            work_exp  = exp_in - 7'sd1;  
+                        end else begin
+                            work_mant = mant_in;
+                            work_exp  = exp_in;
+                        end
+                        
+                        exp_out <= {work_exp[6], work_exp[6:1]};
+                        stored_exp <= {work_exp[6], work_exp[6:1]};
+                        stored_sign <= 1'b0;
+                        
+                        radicand  <= {work_mant, 22'd0};
+                        remainder <= 23'd0;
+                        root      <= 12'd0;
+                        iter_left <= ITER_MAX;
+                        active    <= 1'b1;
+                    end
+                end
+                
+                if (active) begin
+                    radicand <= {radicand[31:0], 2'b00};
+                    
+                    remainder <= (remainder_next >= trial_comb) ? 
+                                 (remainder_next - trial_comb) : 
+                                 remainder_next;
+                    root      <= root_next;
+                    
+                    it_valid <= 1'b1;
+                
+                    is_nan_out  <= 1'b0;
+                    is_pinf_out <= 1'b0;
+                    is_ninf_out <= 1'b0;
+                    
+                    if (iter_left > 4'd1)
+                        mant_out <= root_next[10:0] << (iter_left - 4'd1);
+                    else
+                        mant_out <= root_next[10:0];
+                    
+                    if (iter_left == 4'd1) begin
+                        result    <= 1'b1;
+                        active    <= 1'b0;
+                        iter_left <= 4'd0;
+                        done <= 1'b1;
+                        
+                        stored_mant <= root_next[10:0];
+                        stored_is_nan  <= 1'b0;
+                        stored_is_pinf <= 1'b0;
+                        stored_is_ninf <= 1'b0;
+                    end else begin
+                        iter_left <= iter_left - 4'd1;
+                    end
+                end
             end
         end
     end

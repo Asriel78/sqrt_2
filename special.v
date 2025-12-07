@@ -55,9 +55,9 @@ module special (
                     is_ninf      <= 1'b0;
                     is_normal    <= 1'b0;
                     is_subnormal <= 1'b0;
-                    sign_out <= sign_in;  
+                    sign_out <= 1'b1;
                     exp_out  <= EXP_MAX;
-                    mant_out <= mant_in | QUIET_BIT; 
+                    mant_out <= QUIET_BIT;
                 end
                 else if (is_negative_number) begin
                     is_nan       <= 1'b1;
@@ -65,7 +65,6 @@ module special (
                     is_ninf      <= 1'b0;
                     is_normal    <= 1'b0;
                     is_subnormal <= 1'b0;
-                    
                     sign_out <= 1'b1;
                     exp_out  <= EXP_MAX;
                     mant_out <= QUIET_BIT;

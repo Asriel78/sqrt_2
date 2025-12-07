@@ -30,6 +30,15 @@ module pack (
     reg [10:0] shifted;
     reg [4:0] shift_amt;
 
+    initial begin
+        p_valid = 1'b0;
+        result_out = 1'b0;
+        out_data = 16'h0000;
+        is_nan_out = 1'b0;
+        is_pinf_out = 1'b0;
+        is_ninf_out = 1'b0;
+    end
+
     always @(posedge clk) begin
         if (!enable) begin
             p_valid     <= 1'b0;
@@ -53,7 +62,6 @@ module pack (
                     out_data <= {1'b1, 5'b11111, 10'b1000000000};
                 end
                 
-
                 else if (is_pinf_in) begin
                     out_data <= 16'h7C00; 
                 end

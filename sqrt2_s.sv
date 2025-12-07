@@ -1,5 +1,13 @@
 `timescale 1ns/1ps
 
+`include "helper_modules.v"
+`include "basic_modules.v"
+`include "load_s.v"
+`include "special_s.v"
+`include "normalize_s.v"
+`include "iterate_s.v"
+`include "pack_s.v"
+
 module sqrt2 (
     inout  wire [15:0] IO_DATA,
     output wire        IS_NAN,
