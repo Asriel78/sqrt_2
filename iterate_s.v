@@ -28,6 +28,15 @@ module iterate (
 
     localparam ITER_MAX = 4'd11;
 
+    wire active;
+    wire [3:0] iter_left;
+    wire [33:0] radicand;
+    wire [22:0] remainder;
+    wire [11:0] root;
+    wire is_special;
+    wire stored_is_nan, stored_is_pinf, stored_is_ninf;
+
+
     wire [6:0] minus15 = 7'b1110001;
     wire exp_is_minus15, mant_is_zero, is_zero;
     
@@ -35,67 +44,81 @@ module iterate (
     is_zero_n #(.WIDTH(11)) mant_check(.in(mant_in), .is_zero(mant_is_zero));
     and(is_zero, exp_is_minus15, mant_is_zero);
     
+
     wire not_is_num, is_special_input;
     not(not_is_num, is_num);
     or(is_special_input, not_is_num, is_nan_in, is_pinf_in, is_ninf_in);
     
+
     wire active_n, start_trigger;
     not(active_n, active);
     and(start_trigger, n_valid, active_n);
 
-    wire [11:0] work_mant;
-    wire signed [6:0] work_exp;
-    sqrt_exponent_adjust exp_adjuster(
-        .exp_in(exp_in),
-        .mant_in(mant_in),
-        .exp_out(work_exp),
-        .mant_out(work_mant)
+  
+    wire [22:0] trial = {root[10:0], 2'b01};
+    wire [22:0] remainder_next = {remainder[20:0], radicand[33:32]};
+    
+    wire rem_gte_trial;
+    comparator_gte_n #(.WIDTH(23)) cmp(.a(remainder_next), .b(trial), .gte(rem_gte_trial));
+    
+    wire [11:0] root_next;
+    mux2_n #(.WIDTH(12)) root_mux(
+        .a({root[10:0], 1'b0}),
+        .b({root[10:0], 1'b1}),
+        .sel(rem_gte_trial),
+        .out(root_next)
     );
+    
+    wire [22:0] remainder_sub;
+    wire borrow;
+    subtractor_n #(.WIDTH(23)) sub(.a(remainder_next), .b(trial), .diff(remainder_sub), .borrow(borrow));
+
+    wire exp_is_odd = exp_in[0];
+    
+    wire [11:0] work_mant;
+    mux2_n #(.WIDTH(12)) mant_mux(
+        .a({1'b0, mant_in}),
+        .b({mant_in, 1'b0}),
+        .sel(exp_is_odd),
+        .out(work_mant)
+    );
+    
+    wire signed [6:0] exp_dec;
+    wire cout;
+    adder_n #(.WIDTH(7)) exp_add(.a(exp_in), .b(7'b1111111), .cin(1'b0), .sum(exp_dec), .cout(cout));
+    
+    wire signed [6:0] work_exp;
+    mux2_n #(.WIDTH(7)) exp_mux(.a(exp_in), .b(exp_dec), .sel(exp_is_odd), .out(work_exp));
     
     wire signed [6:0] exp_out_calc = {work_exp[6], work_exp[6:1]};
 
-    wire active;
-    wire [3:0] iter_left;
-    wire iter_is_last;
-    sqrt_state_machine #(.ITER_MAX(ITER_MAX)) state_machine(
-        .clk(clk),
-        .enable(enable),
-        .start_trigger(start_trigger),
-        .is_special_input(is_zero | is_special_input),
-        .active(active),
-        .iter_left(iter_left),
-        .iter_is_last(iter_is_last)
-    );
-
-    wire [33:0] radicand;
-    wire [22:0] remainder;
-    wire [11:0] root;
+    wire iter_gt_1;
+    comparator_gt_n #(.WIDTH(4)) iter_cmp(.a(iter_left), .b(4'd1), .gt(iter_gt_1));
     
-    wire [11:0] root_next;
-    wire [22:0] remainder_next;
-    wire [33:0] radicand_next;
+    wire [3:0] shift_amt;
+    decrement_n #(.WIDTH(4)) dec(.in(iter_left), .out(shift_amt));
     
-    sqrt_iteration_step iteration(
-        .root_in(root),
-        .remainder_in(remainder),
-        .radicand_in(radicand),
-        .root_out(root_next),
-        .remainder_out(remainder_next),
-        .radicand_out(radicand_next)
-    );
-
+    wire [10:0] mant_shifted;
+    barrel_shift_left_11bit shifter(.in(root_next[10:0]), .shift_amt(shift_amt), .out(mant_shifted));
+    
     wire [10:0] mant_computing;
-    iteration_output_formatter formatter(
-        .root(root_next),
-        .iter_left(iter_left),
-        .mant_out(mant_computing)
-    );
+    mux2_n #(.WIDTH(11)) mant_comp_mux(.a(root_next[10:0]), .b(mant_shifted), .sel(iter_gt_1), .out(mant_computing));
 
+    wire iter_eq_1, iter_not_1;
+    comparator_eq_n #(.WIDTH(4)) iter_eq(.a(iter_left), .b(4'd1), .eq(iter_eq_1));
+    not(iter_not_1, iter_eq_1);
+    
     wire start_compute;
     wire not_zero, not_special;
     not(not_zero, is_zero);
     not(not_special, is_special_input);
     and(start_compute, start_trigger, not_zero, not_special);
+    
+    wire active_stay;
+    and(active_stay, active, iter_not_1);
+
+    wire active_next_en;
+    or(active_next_en, start_compute, active_stay);
     
     wire [3:0] iter_next_en;
     wire [3:0] iter_dec;
@@ -105,21 +128,23 @@ module iterate (
     mux2_n #(.WIDTH(4)) iter_m2(.a(iter_temp), .b(iter_dec), .sel(active), .out(iter_next_en));
     
     wire [33:0] rad_next_en;
+    wire [33:0] rad_shift = {radicand[31:0], 2'b00};
     wire [33:0] rad_temp;
     mux2_n #(.WIDTH(34)) rad_m1(.a(radicand), .b({work_mant, 22'd0}), .sel(start_compute), .out(rad_temp));
-    mux2_n #(.WIDTH(34)) rad_m2(.a(rad_temp), .b(radicand_next), .sel(active), .out(rad_next_en));
+    mux2_n #(.WIDTH(34)) rad_m2(.a(rad_temp), .b(rad_shift), .sel(active), .out(rad_next_en));
     
     wire [22:0] rem_next_en;
+    wire [22:0] rem_upd;
+    mux2_n #(.WIDTH(23)) rem_m1(.a(remainder_next), .b(remainder_sub), .sel(rem_gte_trial), .out(rem_upd));
     wire [22:0] rem_temp;
-    mux2_n #(.WIDTH(23)) rem_m1(.a(remainder), .b(23'd0), .sel(start_compute), .out(rem_temp));
-    mux2_n #(.WIDTH(23)) rem_m2(.a(rem_temp), .b(remainder_next), .sel(active), .out(rem_next_en));
+    mux2_n #(.WIDTH(23)) rem_m2(.a(remainder), .b(23'd0), .sel(start_compute), .out(rem_temp));
+    mux2_n #(.WIDTH(23)) rem_m3(.a(rem_temp), .b(rem_upd), .sel(active), .out(rem_next_en));
     
     wire [11:0] root_next_en;
     wire [11:0] root_temp;
     mux2_n #(.WIDTH(12)) root_m1(.a(root), .b(12'd0), .sel(start_compute), .out(root_temp));
     mux2_n #(.WIDTH(12)) root_m2(.a(root_temp), .b(root_next), .sel(active), .out(root_next_en));
     
-    wire is_special;
     wire is_special_next_en;
     wire spec_set, spec_keep;
     or(spec_set, is_zero, is_special_input);
@@ -128,7 +153,6 @@ module iterate (
     and(spec_held, is_special, active_n);
     or(is_special_next_en, spec_keep, spec_held);
     
-    wire stored_is_nan, stored_is_pinf, stored_is_ninf;
     wire store_flags;
     and(store_flags, start_trigger, is_special_input);
     
@@ -159,7 +183,7 @@ module iterate (
     wire result_next_en;
     wire res_start, res_active, res_on;
     and(res_start, start_trigger, spec_set);
-    and(res_active, active, iter_is_last);
+    and(res_active, active, iter_eq_1);
     or(res_on, res_start, res_active);
     assign result_next_en = res_on;
     
@@ -216,7 +240,7 @@ module iterate (
     or(pinf_next, pinf_spec, pinf_stored);
     or(ninf_next, ninf_stored);
 
-    wire is_special_final;
+    wire active_final, is_special_final;
     wire [3:0] iter_final;
     wire [33:0] rad_final;
     wire [22:0] rem_final;
@@ -227,6 +251,7 @@ module iterate (
     wire [10:0] mant_final;
     wire nan_final, pinf_final, ninf_final;
     
+    mux2 a_en(.a(1'b0), .b(active_next_en), .sel(enable), .out(active_final));
     mux2 sp_en(.a(1'b0), .b(is_special_next_en), .sel(enable), .out(is_special_final));
     mux2_n #(.WIDTH(4)) i_en(.a(4'd0), .b(iter_next_en), .sel(enable), .out(iter_final));
     mux2_n #(.WIDTH(34)) r_en(.a(34'd0), .b(rad_next_en), .sel(enable), .out(rad_final));
@@ -247,6 +272,7 @@ module iterate (
     mux2 p_en(.a(1'b0), .b(pinf_next), .sel(enable), .out(pinf_final));
     mux2 ni_en(.a(1'b0), .b(ninf_next), .sel(enable), .out(ninf_final));
 
+    dff active_ff(.clk(clk), .d(active_final), .q(active));
     dff special_ff(.clk(clk), .d(is_special_final), .q(is_special));
     register_n #(.WIDTH(4)) iter_reg(.clk(clk), .rst(1'b0), .d(iter_final), .q(iter_left));
     register_n #(.WIDTH(34)) rad_reg(.clk(clk), .rst(1'b0), .d(rad_final), .q(radicand));

@@ -10,72 +10,23 @@ module load(
     output wire        valid  
 );
 
-    wire prev_enable;
-    wire enable_n;
-    wire prev_enable_n;
     wire first_cycle;
-    wire valid_next;
-    wire prev_enable_next;
-
-    not(enable_n, enable);
-    not(prev_enable_n, prev_enable);
-    
-    and(first_cycle, enable, prev_enable_n);
-    
-    assign prev_enable_next = enable;
-    assign valid_next = first_cycle;
-    
-    wire prev_enable_d;
-    mux2 prev_en_mux(
-        .a(1'b0),
-        .b(prev_enable_next),
-        .sel(enable),
-        .out(prev_enable_d)
-    );
-    
-    dff prev_enable_ff(
+    first_cycle_detector fcd(
         .clk(clk),
-        .d(prev_enable_d),
-        .q(prev_enable)
+        .enable(enable),
+        .first_cycle(first_cycle)
     );
     
     wire valid_d;
-    mux2 valid_mux(
-        .a(1'b0),
-        .b(valid_next),
-        .sel(enable),
-        .out(valid_d)
-    );
-    
-    dff valid_ff(
-        .clk(clk),
-        .d(valid_d),
-        .q(valid)
-    );
+    mux2 valid_mux(.a(1'b0), .b(first_cycle), .sel(enable), .out(valid_d));
+    dff valid_ff(.clk(clk), .d(valid_d), .q(valid));
     
     wire [15:0] data_latched;
-    wire [15:0] data_next;
-    
-    mux2_n #(.WIDTH(16)) data_mux(
-        .a(data_latched),
-        .b(data),
-        .sel(first_cycle),
-        .out(data_next)
-    );
-    
-    wire [15:0] data_to_reg;
-    mux2_n #(.WIDTH(16)) data_en_mux(
-        .a(data_latched),
-        .b(data_next),
-        .sel(enable),
-        .out(data_to_reg)
-    );
-    
-    register_n #(.WIDTH(16)) data_reg(
+    register_with_enable #(.WIDTH(16)) data_reg(
         .clk(clk),
-        .rst(1'b0),
-        .d(data_to_reg),
-        .q(data_latched)
+        .enable(first_cycle),
+        .d_in(data),
+        .q_out(data_latched)
     );
     
     assign sign = data_latched[15];
