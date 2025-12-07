@@ -152,7 +152,7 @@ module iterate (
                         work_exp  = exp_in;
                     end
                     
-                    exp_out <= work_exp >>> 1;
+                    exp_out <= {work_exp[6], work_exp[6:1]};
                     
                     radicand  <= {work_mant, 22'd0};
                     remainder <= 23'd0;

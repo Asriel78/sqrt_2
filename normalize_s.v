@@ -29,233 +29,247 @@ module normalize (
 
     localparam signed [6:0] BIAS = 7'd15;
 
-    wire is_zero_input;
-    wire exp_zero;
-    wire mant_zero;
+    // ========================================================================
+    // –î–µ—Ç–µ–∫—Ç–æ—Ä –Ω—É–ª—è: exp=0 && mant=0
+    // ========================================================================
+    wire exp_is_zero, mant_is_zero, is_zero;
     
-    is_zero_n #(.WIDTH(5)) exp_z(.in(exp_in), .is_zero(exp_zero));
-    is_zero_n #(.WIDTH(10)) mant_z(.in(mant_in), .is_zero(mant_zero));
-    and(is_zero_input, exp_zero, mant_zero);
+    is_zero_n #(.WIDTH(5)) exp_zero_check(.in(exp_in), .is_zero(exp_is_zero));
+    is_zero_n #(.WIDTH(10)) mant_zero_check(.in(mant_in), .is_zero(mant_is_zero));
+    and(is_zero, exp_is_zero, mant_is_zero);
 
-    // CLZ ‰Îˇ ÒÛ·ÌÓÏ‡Î¸Ì˚ı
-    wire [3:0] clz_count;
-    clz_10bit clz_inst(.in(mant_in), .count(clz_count));
+    // ========================================================================
+    // Count Leading Zeros –¥–ª—è subnormal (–ø–æ–∑–∏—Ü–∏—è –ø–µ—Ä–≤–æ–π 1)
+    // ========================================================================
+    wire [3:0] clz;
+    
+    // Priority encoder –¥–ª—è 10-–±–∏—Ç–Ω–æ–π –º–∞–Ω—Ç–∏—Å—Å—ã
+    assign clz = 
+        mant_in[9] ? 4'd0 :
+        mant_in[8] ? 4'd1 :
+        mant_in[7] ? 4'd2 :
+        mant_in[6] ? 4'd3 :
+        mant_in[5] ? 4'd4 :
+        mant_in[4] ? 4'd5 :
+        mant_in[3] ? 4'd6 :
+        mant_in[2] ? 4'd7 :
+        mant_in[1] ? 4'd8 :
+        mant_in[0] ? 4'd9 : 4'd10;
 
-    // ÕÓÏ‡ÎËÁ‡ˆËˇ Ï‡ÌÚËÒÒ˚ ÒÛ·ÌÓÏ‡Î¸Ì˚ı: Ò‰‚Ë„ ‚ÎÂ‚Ó Ì‡ (clz+1)
-    wire [3:0] shift_amt_subnorm;
-    increment_n #(.WIDTH(4)) clz_inc(
-        .in(clz_count),
-        .out(shift_amt_subnorm),
-        .overflow()
-    );
+    // ========================================================================
+    // –û–±—Ä–∞–±–æ—Ç–∫–∞ NORMAL —á–∏—Å–µ–ª
+    // ========================================================================
+    wire [10:0] normal_mant;
+    wire signed [6:0] normal_exp;
+    wire signed [6:0] exp_extended;
+    wire signed [6:0] exp_minus_bias;
     
-    wire [10:0] mant_subnorm_shifted;
-    wire [10:0] mant_subnorm_input;
-    assign mant_subnorm_input = {1'b0, mant_in};
+    // –ú–∞–Ω—Ç–∏—Å—Å–∞: –¥–æ–±–∞–≤–ª—è–µ–º implicit bit = 1
+    assign normal_mant = {1'b1, mant_in};
     
-    // Barrel shifter ‰Îˇ ÒÛ·ÌÓÏ‡Î¸Ì˚ı
-    wire [10:0] subnorm_stage0, subnorm_stage1, subnorm_stage2, subnorm_stage3;
+    // –≠–∫—Å–ø–æ–Ω–µ–Ω—Ç–∞: exp_in - BIAS
+    // –†–∞—Å—à–∏—Ä—è–µ–º exp_in –¥–æ 7 –±–∏—Ç (–±–µ–∑–∑–Ω–∞–∫–æ–≤–æ–µ -> –∑–Ω–∞–∫–æ–≤–æ–µ)
+    assign exp_extended = {2'b00, exp_in};
     
+    // –í—ã—á–∏—Ç–∞–Ω–∏–µ: exp_extended - 15
+    wire [6:0] bias_7bit = 7'd15;
+    wire [6:0] bias_negated;
+    wire cout_bias;
+    
+    // –ò–Ω–≤–µ—Ä—Ç–∏—Ä—É–µ–º bias –¥–ª—è –≤—ã—á–∏—Ç–∞–Ω–∏—è
     genvar i;
     generate
-        for (i = 0; i < 11; i = i + 1) begin : subnorm_s0
-            if (i == 0)
-                mux2 m(.a(mant_subnorm_input[i]), .b(1'b0), .sel(shift_amt_subnorm[0]), .out(subnorm_stage0[i]));
-            else
-                mux2 m(.a(mant_subnorm_input[i]), .b(mant_subnorm_input[i-1]), .sel(shift_amt_subnorm[0]), .out(subnorm_stage0[i]));
-        end
-        
-        for (i = 0; i < 11; i = i + 1) begin : subnorm_s1
-            if (i < 2)
-                mux2 m(.a(subnorm_stage0[i]), .b(1'b0), .sel(shift_amt_subnorm[1]), .out(subnorm_stage1[i]));
-            else
-                mux2 m(.a(subnorm_stage0[i]), .b(subnorm_stage0[i-2]), .sel(shift_amt_subnorm[1]), .out(subnorm_stage1[i]));
-        end
-        
-        for (i = 0; i < 11; i = i + 1) begin : subnorm_s2
-            if (i < 4)
-                mux2 m(.a(subnorm_stage1[i]), .b(1'b0), .sel(shift_amt_subnorm[2]), .out(subnorm_stage2[i]));
-            else
-                mux2 m(.a(subnorm_stage1[i]), .b(subnorm_stage1[i-4]), .sel(shift_amt_subnorm[2]), .out(subnorm_stage2[i]));
-        end
-        
-        for (i = 0; i < 11; i = i + 1) begin : subnorm_s3
-            if (i < 8)
-                mux2 m(.a(subnorm_stage2[i]), .b(1'b0), .sel(shift_amt_subnorm[3]), .out(subnorm_stage3[i]));
-            else
-                mux2 m(.a(subnorm_stage2[i]), .b(subnorm_stage2[i-8]), .sel(shift_amt_subnorm[3]), .out(subnorm_stage3[i]));
+        for (i = 0; i < 7; i = i + 1) begin : bias_inv
+            not(bias_negated[i], bias_7bit[i]);
         end
     endgenerate
     
-    assign mant_subnorm_shifted = subnorm_stage3;
-
-    // ›ÍÒÔÓÌÂÌÚ‡ ‰Îˇ ÒÛ·ÌÓÏ‡Î¸Ì˚ı: -BIAS - clz
-    wire [6:0] clz_extended;
-    assign clz_extended = {3'b000, clz_count};
-    
-    wire [6:0] neg_bias;
-    wire [6:0] bias_const;
-    wire [6:0] bias_inv;
-    
-    assign bias_const = BIAS;
-    
-    generate
-        for (i = 0; i < 7; i = i + 1) begin : bias_inv_gen
-            not(bias_inv[i], bias_const[i]);
-        end
-    endgenerate
-    adder_n #(.WIDTH(7)) bias_neg(
-        .a(bias_inv),
-        .b(7'd1),
-        .cin(1'b0),
-        .sum(neg_bias),
-        .cout()
-    );
-    
-    wire [6:0] exp_subnorm;
-    subtractor_n #(.WIDTH(7)) exp_sub(
-        .a(neg_bias),
-        .b(clz_extended),
-        .diff(exp_subnorm),
-        .borrow()
-    );
-
-    // ›ÍÒÔÓÌÂÌÚ‡ ‰Îˇ ÌÓÏ‡Î¸Ì˚ı: exp_in - BIAS
-    wire [6:0] exp_extended;
-    assign exp_extended = {2'b00, exp_in};
-    wire [6:0] exp_normal;
-    subtractor_n #(.WIDTH(7)) exp_norm_sub(
+    adder_n #(.WIDTH(7)) exp_sub(
         .a(exp_extended),
-        .b(BIAS),
-        .diff(exp_normal),
-        .borrow()
+        .b(bias_negated),
+        .cin(1'b1),  // +1 –¥–ª—è –¥–æ–ø–æ–ª–Ω–µ–Ω–∏—è –¥–æ –¥–≤—É—Ö
+        .sum(normal_exp),
+        .cout(cout_bias)
     );
 
-    // Ã‡ÌÚËÒÒ‡ ‰Îˇ ÌÓÏ‡Î¸Ì˚ı
-    wire [10:0] mant_normal;
-    assign mant_normal = {1'b1, mant_in};
-
-    // Ã‡ÌÚËÒÒ‡ ‰Îˇ ÒÔÂˆË‡Î¸Ì˚ı ÁÌ‡˜ÂÌËÈ
-    wire [10:0] mant_special;
-    assign mant_special = {1'b0, mant_in};
-
-    // ›ÍÒÔÓÌÂÌÚ‡ ‰Îˇ ÌÛÎˇ: -15
-    wire [6:0] exp_zero_val;
-    wire [6:0] fifteen_const;
-    wire [6:0] fifteen_inv;
+    // ========================================================================
+    // –û–±—Ä–∞–±–æ—Ç–∫–∞ SUBNORMAL —á–∏—Å–µ–ª
+    // ========================================================================
+    wire [10:0] subnorm_mant;
+    wire signed [6:0] subnorm_exp;
     
-    assign fifteen_const = 7'd15;
+    // –°–¥–≤–∏–≥–∞–µ–º –º–∞–Ω—Ç–∏—Å—Å—É –≤–ª–µ–≤–æ –Ω–∞ (clz + 1) –ø–æ–∑–∏—Ü–∏–π
+    // –í–ê–ñ–ù–û: –≤ –ø–æ–≤–µ–¥–µ–Ω—á–µ—Å–∫–æ–π –≤–µ—Ä—Å–∏–∏ —ç—Ç–æ 11-–±–∏—Ç–Ω–æ–µ —á–∏—Å–ª–æ {1'b0, mant_in} = 11 –±–∏—Ç
+    wire [3:0] clz_plus_1;
+    wire cout_clz;
+    
+    adder_n #(.WIDTH(4)) clz_inc(
+        .a(clz),
+        .b(4'd1),
+        .cin(1'b0),
+        .sum(clz_plus_1),
+        .cout(cout_clz)
+    );
+    
+    // –†–∞—Å—à–∏—Ä—è–µ–º –¥–æ 11 –±–∏—Ç: {1'b0, mant_in} = 11 –±–∏—Ç
+    wire [10:0] mant_to_shift;
+    assign mant_to_shift = {1'b0, mant_in};
+    
+    wire [10:0] mant_shifted;
+    
+    barrel_shift_left_11bit shifter(
+        .in(mant_to_shift),
+        .shift_amt(clz_plus_1),
+        .out(mant_shifted)
+    );
+    
+    assign subnorm_mant = mant_shifted;
+    
+    // –≠–∫—Å–ø–æ–Ω–µ–Ω—Ç–∞: -15 - clz
+    wire signed [6:0] minus_15 = -7'd15;
+    wire signed [6:0] clz_extended = {3'b000, clz};
+    wire signed [6:0] clz_negated;
+    wire cout_clz_exp;
     
     generate
-        for (i = 0; i < 7; i = i + 1) begin : fifteen_inv_gen
-            not(fifteen_inv[i], fifteen_const[i]);
+        for (i = 0; i < 7; i = i + 1) begin : clz_inv
+            not(clz_negated[i], clz_extended[i]);
         end
     endgenerate
-    adder_n #(.WIDTH(7)) exp_zero_calc(
-        .a(fifteen_inv),
-        .b(7'd1),
-        .cin(1'b0),
-        .sum(exp_zero_val),
-        .cout()
+    
+    adder_n #(.WIDTH(7)) subnorm_exp_calc(
+        .a(minus_15),
+        .b(clz_negated),
+        .cin(1'b1),
+        .sum(subnorm_exp),
+        .cout(cout_clz_exp)
     );
 
-    //  ÓÏ·ËÌ‡ˆËÓÌÌ‡ˇ ÎÓ„ËÍ‡ ‚˚·Ó‡ ‚˚ıÓ‰Ó‚
+    // ========================================================================
+    // –ö–æ–º–±–∏–Ω–∞—Ü–∏–æ–Ω–Ω–∞—è –ª–æ–≥–∏–∫–∞ –≤—ã–±–æ—Ä–∞ —Ä–µ–∑—É–ª—å—Ç–∞—Ç–∞
+    // ========================================================================
     wire [10:0] mant_out_comb;
-    wire [6:0] exp_out_comb;
+    wire signed [6:0] exp_out_comb;
     wire sign_out_comb;
-    wire is_num_comb, is_nan_comb, is_pinf_comb, is_ninf_comb;
-
-    assign sign_out_comb = sign_in;
-
-    // ¬˚·Ó Ï‡ÌÚËÒÒ˚
-    wire [10:0] mant_choice1;
-    mux2_n #(.WIDTH(11)) mant_m1(
-        .a(mant_special),
-        .b(mant_normal),
+    wire is_num_comb;
+    wire is_nan_comb, is_pinf_comb, is_ninf_comb;
+    
+    // –í—ã–±–æ—Ä –º–µ–∂–¥—É zero/normal/subnormal/special
+    wire [10:0] mant_choice1, mant_choice2;
+    wire signed [6:0] exp_choice1, exp_choice2;
+    
+    // –ü–µ—Ä–≤—ã–π —É—Ä–æ–≤–µ–Ω—å: zero vs normal
+    mux2_n #(.WIDTH(11)) mant_mux1(
+        .a(11'd0),
+        .b(normal_mant),
         .sel(is_normal_in),
         .out(mant_choice1)
     );
     
-    wire [10:0] mant_choice2;
-    mux2_n #(.WIDTH(11)) mant_m2(
-        .a(mant_choice1),
-        .b(mant_subnorm_shifted),
-        .sel(is_subnormal_in),
-        .out(mant_choice2)
-    );
-    
-    mux2_n #(.WIDTH(11)) mant_m3(
-        .a(mant_choice2),
-        .b(11'd0),
-        .sel(is_zero_input),
-        .out(mant_out_comb)
-    );
-
-    // ¬˚·Ó ˝ÍÒÔÓÌÂÌÚ˚
-    wire [6:0] exp_choice1;
-    mux2_n #(.WIDTH(7)) exp_m1(
-        .a(exp_normal),
-        .b(exp_normal),
+    mux2_n #(.WIDTH(7)) exp_mux1(
+        .a(-7'd15),
+        .b(normal_exp),
         .sel(is_normal_in),
         .out(exp_choice1)
     );
     
-    wire [6:0] exp_choice2;
-    mux2_n #(.WIDTH(7)) exp_m2(
-        .a(exp_choice1),
-        .b(exp_subnorm),
-        .sel(is_subnormal_in),
+    // –í—Ç–æ—Ä–æ–π —É—Ä–æ–≤–µ–Ω—å: (zero/normal) vs subnormal
+    wire zero_or_normal;
+    or(zero_or_normal, is_zero, is_normal_in);
+    
+    mux2_n #(.WIDTH(11)) mant_mux2(
+        .a(subnorm_mant),
+        .b(mant_choice1),
+        .sel(zero_or_normal),
+        .out(mant_choice2)
+    );
+    
+    mux2_n #(.WIDTH(7)) exp_mux2(
+        .a(subnorm_exp),
+        .b(exp_choice1),
+        .sel(zero_or_normal),
         .out(exp_choice2)
     );
     
-    mux2_n #(.WIDTH(7)) exp_m3(
-        .a(exp_choice2),
-        .b(exp_zero_val),
-        .sel(is_zero_input),
+    // –¢—Ä–µ—Ç–∏–π —É—Ä–æ–≤–µ–Ω—å: —á–∏—Å–ª–æ vs special
+    wire is_any_special;
+    or(is_any_special, is_nan_in, is_pinf_in, is_ninf_in);
+    
+    wire not_is_any_special;
+    not(not_is_any_special, is_any_special);
+    
+    mux2_n #(.WIDTH(11)) mant_mux3(
+        .a({1'b0, mant_in}),
+        .b(mant_choice2),
+        .sel(not_is_any_special),
+        .out(mant_out_comb)
+    );
+    
+    mux2_n #(.WIDTH(7)) exp_mux3(
+        .a(exp_extended),
+        .b(exp_choice2),
+        .sel(not_is_any_special),
         .out(exp_out_comb)
     );
-
-    // ‘Î‡„Ë
-    wire is_regular;
-    or(is_regular, is_normal_in, is_subnormal_in, is_zero_input);
-    assign is_num_comb = is_regular;
+    
+    // sign –≤—Å–µ–≥–¥–∞ –ø–µ—Ä–µ–¥–∞—ë—Ç—Å—è –∫–∞–∫ –µ—Å—Ç—å
+    assign sign_out_comb = sign_in;
+    
+    // is_num = !(is_nan || is_pinf || is_ninf)
+    not(is_num_comb, is_any_special);
+    
     assign is_nan_comb = is_nan_in;
     assign is_pinf_comb = is_pinf_in;
     assign is_ninf_comb = is_ninf_in;
 
-    // –Â„ËÒÚ˚
-    wire n_valid_next;
-    and(n_valid_next, s_valid, enable);
+    // ========================================================================
+    // –†–µ–≥–∏—Å—Ç—Ä—ã –≤—ã–≤–æ–¥–∞
+    // ========================================================================
+    wire capture;
+    and(capture, s_valid, enable);
     
+    // n_valid
     wire n_valid_d;
-    mux2 n_valid_mux(.a(1'b0), .b(n_valid_next), .sel(enable), .out(n_valid_d));
-    dff n_valid_ff(.clk(clk), .d(n_valid_d), .q(n_valid));
-
+    mux2 valid_mux(.a(1'b0), .b(capture), .sel(enable), .out(n_valid_d));
+    dff valid_ff(.clk(clk), .d(n_valid_d), .q(n_valid));
+    
+    // –§–ª–∞–≥–∏
     wire is_num_d, is_nan_d, is_pinf_d, is_ninf_d;
+    mux2 is_num_mux(.a(is_num), .b(is_num_comb), .sel(capture), .out(is_num_d));
+    mux2 is_nan_mux(.a(is_nan), .b(is_nan_comb), .sel(capture), .out(is_nan_d));
+    mux2 is_pinf_mux(.a(is_pinf), .b(is_pinf_comb), .sel(capture), .out(is_pinf_d));
+    mux2 is_ninf_mux(.a(is_ninf), .b(is_ninf_comb), .sel(capture), .out(is_ninf_d));
     
-    mux2 is_num_mux(.a(1'b0), .b(is_num_comb), .sel(n_valid_next), .out(is_num_d));
-    dff is_num_ff(.clk(clk), .d(is_num_d), .q(is_num));
+    wire is_num_final, is_nan_final, is_pinf_final, is_ninf_final;
+    mux2 is_num_en(.a(1'b0), .b(is_num_d), .sel(enable), .out(is_num_final));
+    mux2 is_nan_en(.a(1'b0), .b(is_nan_d), .sel(enable), .out(is_nan_final));
+    mux2 is_pinf_en(.a(1'b0), .b(is_pinf_d), .sel(enable), .out(is_pinf_final));
+    mux2 is_ninf_en(.a(1'b0), .b(is_ninf_d), .sel(enable), .out(is_ninf_final));
     
-    mux2 is_nan_mux(.a(1'b0), .b(is_nan_comb), .sel(n_valid_next), .out(is_nan_d));
-    dff is_nan_ff(.clk(clk), .d(is_nan_d), .q(is_nan));
+    dff is_num_ff(.clk(clk), .d(is_num_final), .q(is_num));
+    dff is_nan_ff(.clk(clk), .d(is_nan_final), .q(is_nan));
+    dff is_pinf_ff(.clk(clk), .d(is_pinf_final), .q(is_pinf));
+    dff is_ninf_ff(.clk(clk), .d(is_ninf_final), .q(is_ninf));
     
-    mux2 is_pinf_mux(.a(1'b0), .b(is_pinf_comb), .sel(n_valid_next), .out(is_pinf_d));
-    dff is_pinf_ff(.clk(clk), .d(is_pinf_d), .q(is_pinf));
-    
-    mux2 is_ninf_mux(.a(1'b0), .b(is_ninf_comb), .sel(n_valid_next), .out(is_ninf_d));
-    dff is_ninf_ff(.clk(clk), .d(is_ninf_d), .q(is_ninf));
-
+    // –î–∞–Ω–Ω—ã–µ
     wire sign_out_d;
     wire [6:0] exp_out_d;
     wire [10:0] mant_out_d;
     
-    mux2 sign_mux(.a(sign_out), .b(sign_out_comb), .sel(n_valid_next), .out(sign_out_d));
-    dff sign_ff(.clk(clk), .d(sign_out_d), .q(sign_out));
+    mux2 sign_mux(.a(sign_out), .b(sign_out_comb), .sel(capture), .out(sign_out_d));
+    mux2_n #(.WIDTH(7)) exp_mux(.a(exp_out), .b(exp_out_comb), .sel(capture), .out(exp_out_d));
+    mux2_n #(.WIDTH(11)) mant_mux(.a(mant_out), .b(mant_out_comb), .sel(capture), .out(mant_out_d));
     
-    mux2_n #(.WIDTH(7)) exp_mux(.a(exp_out), .b(exp_out_comb), .sel(n_valid_next), .out(exp_out_d));
-    register_n #(.WIDTH(7)) exp_reg(.clk(clk), .rst(1'b0), .d(exp_out_d), .q(exp_out));
+    wire sign_out_final;
+    wire [6:0] exp_out_final;
+    wire [10:0] mant_out_final;
     
-    mux2_n #(.WIDTH(11)) mant_mux(.a(mant_out), .b(mant_out_comb), .sel(n_valid_next), .out(mant_out_d));
-    register_n #(.WIDTH(11)) mant_reg(.clk(clk), .rst(1'b0), .d(mant_out_d), .q(mant_out));
+    mux2 sign_en(.a(1'b0), .b(sign_out_d), .sel(enable), .out(sign_out_final));
+    mux2_n #(.WIDTH(7)) exp_en(.a(7'b0), .b(exp_out_d), .sel(enable), .out(exp_out_final));
+    mux2_n #(.WIDTH(11)) mant_en(.a(11'b0), .b(mant_out_d), .sel(enable), .out(mant_out_final));
+    
+    dff sign_ff(.clk(clk), .d(sign_out_final), .q(sign_out));
+    register_n #(.WIDTH(7)) exp_reg(.clk(clk), .rst(1'b0), .d(exp_out_final), .q(exp_out));
+    register_n #(.WIDTH(11)) mant_reg(.clk(clk), .rst(1'b0), .d(mant_out_final), .q(mant_out));
 
 endmodule

@@ -1,5 +1,24 @@
 `timescale 1ns/1ps
 
+
+`ifdef BEHAVIOUR
+`include "load.v"
+`include "special.v"
+`include "normalize.v"
+`include "iterate.v"
+`include "pack.v"
+`include "sqrt2_b.sv"
+`elsif STRUCTURAL
+`include "load_s.v"
+`include "special_s.v"
+`include "normalize_s.v"
+`include "iterate_s.v"
+`include "pack_s.v"
+`include "sqrt2_s.sv"
+`error "!mode"
+`endif
+
+
 module sqrt2_tb;
     reg         clk;
     reg         enable;

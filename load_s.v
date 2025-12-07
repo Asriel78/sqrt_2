@@ -18,31 +18,20 @@ module load(
     wire first_cycle;  // enable=1 && prev_enable=0
     wire valid_next;
     wire prev_enable_next;
-    
-    // Инверсии
+
     not(enable_n, enable);
     not(prev_enable_n, prev_enable);
     
-    // Определяем первый цикл после enable 0->1
     and(first_cycle, enable, prev_enable_n);
     
-    // Логика для prev_enable_next
-    // Если enable=1, то prev_enable_next = 1
-    // Если enable=0, то prev_enable_next = 0
-    // Проще: prev_enable_next = enable
     assign prev_enable_next = enable;
     
-    // Логика для valid_next
-    // valid = 1 только на первом цикле (first_cycle)
-    // Во всех остальных случаях valid = 0
-    // Если enable=0, то valid=0
     assign valid_next = first_cycle;
     
-    // Регистр prev_enable
     wire prev_enable_d;
     mux2 prev_en_mux(
-        .a(1'b0),              // Если enable=0
-        .b(prev_enable_next),  // Если enable=1
+        .a(1'b0),              
+        .b(prev_enable_next),  
         .sel(enable),
         .out(prev_enable_d)
     );
@@ -53,11 +42,10 @@ module load(
         .q(prev_enable)
     );
     
-    // Регистр valid
     wire valid_d;
     mux2 valid_mux(
-        .a(1'b0),         // Если enable=0
-        .b(valid_next),   // Если enable=1
+        .a(1'b0),        
+        .b(valid_next),  
         .sel(enable),
         .out(valid_d)
     );
@@ -68,11 +56,10 @@ module load(
         .q(valid)
     );
     
-    // Регистры данных (защелкиваются только на first_cycle)
     wire [15:0] data_latched;
     wire [15:0] data_next;
     
-    // Если first_cycle=1, берем новые данные, иначе держим старые
+
     mux2_n #(.WIDTH(16)) data_mux(
         .a(data_latched),
         .b(data),
@@ -80,11 +67,11 @@ module load(
         .out(data_next)
     );
     
-    // Регистр для данных (с enable через first_cycle или текущие данные)
+
     wire [15:0] data_to_reg;
     mux2_n #(.WIDTH(16)) data_en_mux(
         .a(data_latched),  // Если enable=0, держим старое
-        .b(data_next),     // Если enable=1, обновляем
+        .b(data_next),     
         .sel(enable),
         .out(data_to_reg)
     );

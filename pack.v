@@ -49,32 +49,25 @@ module pack (
                 is_pinf_out <= is_pinf_in;
                 is_ninf_out <= is_ninf_in;
 
-                // Случай 1: NaN 
                 if (is_nan_in) begin
-                    // Канонический тихий NaN: 1_11111_1000000000
-                    // Бит 9 мантиссы = 1 (quiet bit)
                     out_data <= {1'b1, 5'b11111, 10'b1000000000};
                 end
                 
-                // Случай 2: +Inf
+
                 else if (is_pinf_in) begin
-                    out_data <= 16'h7C00;  // 0_11111_0000000000
+                    out_data <= 16'h7C00; 
                 end
                 
-                // Случай 3: -Inf -> NaN (обрабатывается как NaN в iterate)
                 else if (is_ninf_in) begin
-                    out_data <= 16'hFE00;  // 1_11111_1000000000
+                    out_data <= 16'hFE00;  
                 end
                 
-                // Случай 4: Обычное число (включая ±0)
                 else begin
                     e_biased = exp_in + BIAS;
 
-                    // Проверка на ±0 (exp=-15, mant=0)
                     if (exp_in == -7'sd15 && mant_in == 11'd0) begin
                         out_data <= {sign_in, 5'b00000, 10'b0000000000};
                     end
-                    // Subnormal результат
                     else if (e_biased <= 0) begin
                         shift_amt = 1 - e_biased;
                         if (shift_amt >= 12)
@@ -85,7 +78,6 @@ module pack (
                         end
                         out_data <= {sign_in, 5'b00000, frac10};
                     end
-                    // Normal результат
                     else begin
                         frac10 = mant_in[9:0];
                         out_data <= {sign_in, e_biased[4:0], frac10};
