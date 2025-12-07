@@ -24,10 +24,6 @@ module iterate (
     output wire        is_ninf_out
 );
 
-    // ========================================================================
-    // State Registers
-    // ========================================================================
-    
     wire active;
     wire [3:0] iter_left;
     wire [33:0] radicand;
@@ -36,10 +32,6 @@ module iterate (
     wire is_special;
     wire stored_is_nan, stored_is_pinf, stored_is_ninf;
 
-    // ========================================================================
-    // Input Classification
-    // ========================================================================
-    
     wire exp_is_minus15, mant_is_zero, is_zero;
     comparator_eq_n #(.WIDTH(7)) exp_cmp(
         .a(exp_in), 
@@ -52,10 +44,6 @@ module iterate (
     wire not_is_num, is_special_input;
     not(not_is_num, is_num);
     or(is_special_input, not_is_num, is_nan_in, is_pinf_in, is_ninf_in);
-
-    // ========================================================================
-    // Control Signals
-    // ========================================================================
     
     wire active_n, start_trigger;
     not(active_n, active);
@@ -74,10 +62,7 @@ module iterate (
     and(active_stay, active, iter_not_1);
     or(active_next, start_compute, active_stay);
 
-    // ========================================================================
-    // Sqrt Computation Pipeline
-    // ========================================================================
-    
+
     wire signed [6:0] exp_halved;
     wire [11:0] mant_prepared;
     sqrt_input_prepare prep(
@@ -106,9 +91,7 @@ module iterate (
         .mant_out(mant_computing)
     );
 
-    // ========================================================================
-    // State Update Logic
-    // ========================================================================
+
     
     wire [3:0] iter_decremented;
     decrement_n #(.WIDTH(4)) iter_dec(.in(iter_left), .out(iter_decremented));
@@ -168,10 +151,6 @@ module iterate (
         .sel(active), 
         .out(root_next_val)
     );
-
-    // ========================================================================
-    // Special Value Handling
-    // ========================================================================
     
     wire spec_detected;
     or(spec_detected, is_zero, is_special_input);
@@ -199,9 +178,6 @@ module iterate (
     or(spinf_next, store_pinf, keep_pinf);
     or(sninf_next, keep_ninf);
 
-    // ========================================================================
-    // Output Value Selection
-    // ========================================================================
     
     wire it_valid_next;
     or(it_valid_next, start_trigger, active);
@@ -211,7 +187,6 @@ module iterate (
     and(result_active, active, iter_eq_1);
     or(result_next, result_start, result_active);
     
-    // Sign selection
     wire sign_for_zero, sign_for_special, sign_for_compute;
     and(sign_for_zero, start_trigger, is_zero);
     and(sign_for_special, start_trigger, is_special_input);
@@ -225,7 +200,6 @@ module iterate (
     mux2 sign_m2(.a(sign_choice1), .b(sign_special_value), .sel(sign_for_special), .out(sign_choice2));
     mux2 sign_m3(.a(sign_choice2), .b(1'b0), .sel(sign_for_compute), .out(sign_next));
     
-    // Exponent selection
     wire signed [6:0] exp_for_zero = 7'b1110001;
     wire signed [6:0] exp_for_special = 7'sd16;
     wire signed [6:0] exp_choice1, exp_choice2, exp_next;
@@ -233,7 +207,6 @@ module iterate (
     mux2_n #(.WIDTH(7)) exp_m2(.a(exp_choice1), .b(exp_for_special), .sel(sign_for_special), .out(exp_choice2));
     mux2_n #(.WIDTH(7)) exp_m3(.a(exp_choice2), .b(exp_halved), .sel(sign_for_compute), .out(exp_next));
     
-    // Mantissa selection
     wire [10:0] mant_for_zero = 11'd0;
     wire [10:0] mant_for_special;
     mux2_n #(.WIDTH(11)) mant_spec_mux(.a(11'd0), .b(11'b10000000000), .sel(is_nan_or_ninf), .out(mant_for_special));
@@ -243,8 +216,7 @@ module iterate (
     mux2_n #(.WIDTH(11)) mant_m2(.a(mant_choice1), .b(mant_for_special), .sel(sign_for_special), .out(mant_choice2));
     mux2_n #(.WIDTH(11)) mant_m3(.a(mant_choice2), .b(mant_out), .sel(sign_for_compute), .out(mant_choice3));
     mux2_n #(.WIDTH(11)) mant_m4(.a(mant_choice3), .b(mant_computing), .sel(active), .out(mant_next));
-    
-    // Result flags
+
     wire restore_flags;
     and(restore_flags, is_special, active_n);
     
@@ -259,12 +231,8 @@ module iterate (
     or(nan_next, nan_spec, nan_restore);
     or(pinf_next, pinf_spec, pinf_restore);
     or(ninf_next, ninf_restore);
-
-    // ========================================================================
-    // Register Updates with Enable Gating
-    // ========================================================================
     
-    wire active_d, is_special_d;
+   wire active_d, is_special_d;
     wire [3:0] iter_d;
     wire [33:0] radicand_d;
     wire [22:0] remainder_d;
@@ -275,28 +243,28 @@ module iterate (
     wire [10:0] mant_d;
     wire nan_d, pinf_d, ninf_d;
     
-    mux2 active_gate(.a(1'b0), .b(active_next), .sel(enable), .out(active_d));
-    mux2 special_gate(.a(1'b0), .b(is_special_next), .sel(enable), .out(is_special_d));
-    mux2_n #(.WIDTH(4)) iter_gate(.a(4'd0), .b(iter_next), .sel(enable), .out(iter_d));
-    mux2_n #(.WIDTH(34)) rad_gate(.a(34'd0), .b(radicand_next_val), .sel(enable), .out(radicand_d));
-    mux2_n #(.WIDTH(23)) rem_gate(.a(23'd0), .b(remainder_next_val), .sel(enable), .out(remainder_d));
-    mux2_n #(.WIDTH(12)) root_gate(.a(12'd0), .b(root_next_val), .sel(enable), .out(root_d));
+    enable_gate active_en_gate(.enable(enable), .data_in(active_next), .data_out(active_d));
+    enable_gate special_en_gate(.enable(enable), .data_in(is_special_next), .data_out(is_special_d));
+    enable_gate #(.WIDTH(4)) iter_en_gate(.enable(enable), .data_in(iter_next), .data_out(iter_d));
+    enable_gate #(.WIDTH(34)) rad_en_gate(.enable(enable), .data_in(radicand_next_val), .data_out(radicand_d));
+    enable_gate #(.WIDTH(23)) rem_en_gate(.enable(enable), .data_in(remainder_next_val), .data_out(remainder_d));
+    enable_gate #(.WIDTH(12)) root_en_gate(.enable(enable), .data_in(root_next_val), .data_out(root_d));
     
-    mux2 snan_gate(.a(1'b0), .b(snan_next), .sel(enable), .out(snan_d));
-    mux2 spinf_gate(.a(1'b0), .b(spinf_next), .sel(enable), .out(spinf_d));
-    mux2 sninf_gate(.a(1'b0), .b(sninf_next), .sel(enable), .out(sninf_d));
+    enable_gate snan_en_gate(.enable(enable), .data_in(snan_next), .data_out(snan_d));
+    enable_gate spinf_en_gate(.enable(enable), .data_in(spinf_next), .data_out(spinf_d));
+    enable_gate sninf_en_gate(.enable(enable), .data_in(sninf_next), .data_out(sninf_d));
     
-    mux2 valid_gate(.a(1'b0), .b(it_valid_next), .sel(enable), .out(it_valid_d));
-    mux2 result_gate(.a(1'b0), .b(result_next), .sel(enable), .out(result_d));
-    mux2 sign_gate(.a(1'b0), .b(sign_next), .sel(enable), .out(sign_d));
-    mux2_n #(.WIDTH(7)) exp_gate(.a(7'sd0), .b(exp_next), .sel(enable), .out(exp_d));
-    mux2_n #(.WIDTH(11)) mant_gate(.a(11'd0), .b(mant_next), .sel(enable), .out(mant_d));
+    enable_gate valid_en_gate(.enable(enable), .data_in(it_valid_next), .data_out(it_valid_d));
+    enable_gate result_en_gate(.enable(enable), .data_in(result_next), .data_out(result_d));
+    enable_gate sign_en_gate(.enable(enable), .data_in(sign_next), .data_out(sign_d));
+    enable_gate #(.WIDTH(7)) exp_en_gate(.enable(enable), .data_in(exp_next), .data_out(exp_d));
+    enable_gate #(.WIDTH(11)) mant_en_gate(.enable(enable), .data_in(mant_next), .data_out(mant_d));
     
-    mux2 nan_gate(.a(1'b0), .b(nan_next), .sel(enable), .out(nan_d));
-    mux2 pinf_gate(.a(1'b0), .b(pinf_next), .sel(enable), .out(pinf_d));
-    mux2 ninf_gate(.a(1'b0), .b(ninf_next), .sel(enable), .out(ninf_d));
+    enable_gate nan_en_gate(.enable(enable), .data_in(nan_next), .data_out(nan_d));
+    enable_gate pinf_en_gate(.enable(enable), .data_in(pinf_next), .data_out(pinf_d));
+    enable_gate ninf_en_gate(.enable(enable), .data_in(ninf_next), .data_out(ninf_d));
 
-    // Flip-flops
+
     dff active_ff(.clk(clk), .d(active_d), .q(active));
     dff special_ff(.clk(clk), .d(is_special_d), .q(is_special));
     register_n #(.WIDTH(4)) iter_reg(.clk(clk), .rst(1'b0), .d(iter_d), .q(iter_left));

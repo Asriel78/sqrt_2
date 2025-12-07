@@ -382,3 +382,16 @@ module barrel_shift_right_11bit(
     
     assign out = stage3;
 endmodule
+
+module enable_gate #(parameter WIDTH = 1) (
+    input wire enable,
+    input wire [WIDTH-1:0] data_in,
+    output wire [WIDTH-1:0] data_out
+);
+    mux2_n #(.WIDTH(WIDTH)) gate(
+        .a({WIDTH{1'b0}}),
+        .b(data_in),
+        .sel(enable),
+        .out(data_out)
+    );
+endmodule
