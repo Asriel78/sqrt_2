@@ -25,29 +25,6 @@ module dff(
     d_latch slave(.d(master_q), .enable(clk), .q(q), .q_n(slave_q_n));
 endmodule
 
-module register_n #(parameter WIDTH = 8) (
-    input wire clk,
-    input wire rst,
-    input wire [WIDTH-1:0] d,
-    output wire [WIDTH-1:0] q
-);
-    wire [WIDTH-1:0] d_gated;
-    wire rst_n;
-    not(rst_n, rst);
-    genvar i;
-    generate
-        for (i = 0; i < WIDTH; i = i + 1) begin : gate_gen
-            wire d_and_rst;
-            and(d_and_rst, d[i], rst_n);
-            assign d_gated[i] = d_and_rst;
-        end
-    endgenerate
-    generate
-        for (i = 0; i < WIDTH; i = i + 1) begin : dff_gen
-            dff dff_inst(.clk(clk), .d(d_gated[i]), .q(q[i]));
-        end
-    endgenerate
-endmodule
 
 module mux2(
     input wire a,
@@ -75,6 +52,89 @@ module mux2_n #(parameter WIDTH = 8) (
         end
     endgenerate
 endmodule
+
+module negate_n #(parameter WIDTH = 8) (
+    input  wire [WIDTH-1:0] in,
+    output wire [WIDTH-1:0] out
+);
+    genvar i;
+    generate
+        for (i = 0; i < WIDTH; i = i + 1) begin : neg
+            not(out[i], in[i]);
+        end
+    endgenerate
+endmodule
+
+
+module register_n #(parameter WIDTH = 8) (
+    input wire clk,
+    input wire rst,
+    input wire [WIDTH-1:0] d,
+    output wire [WIDTH-1:0] q
+);
+    wire [WIDTH-1:0] d_gated;
+    wire rst_n;
+    not(rst_n, rst);
+    genvar i;
+    generate
+        for (i = 0; i < WIDTH; i = i + 1) begin : gate_gen
+            wire d_and_rst;
+            and(d_and_rst, d[i], rst_n);
+            assign d_gated[i] = d_and_rst;
+        end
+    endgenerate
+    generate
+        for (i = 0; i < WIDTH; i = i + 1) begin : dff_gen
+            dff dff_inst(.clk(clk), .d(d_gated[i]), .q(q[i]));
+        end
+    endgenerate
+endmodule
+
+module register_with_enable #(parameter WIDTH = 8) (
+    input  wire clk,
+    input  wire enable,
+    input  wire [WIDTH-1:0] d_in,
+    output wire [WIDTH-1:0] q_out
+);
+    wire [WIDTH-1:0] d_gated;
+    
+    mux2_n #(.WIDTH(WIDTH)) enable_mux(
+        .a(q_out),
+        .b(d_in),
+        .sel(enable),
+        .out(d_gated)
+    );
+    
+    register_n #(.WIDTH(WIDTH)) reg_inst(
+        .clk(clk),
+        .rst(1'b0),
+        .d(d_gated),
+        .q(q_out)
+    );
+endmodule
+
+module dff_with_enable (
+    input  wire clk,
+    input  wire enable,
+    input  wire d_in,
+    output wire q_out
+);
+    wire d_gated;
+    
+    mux2 enable_mux(
+        .a(q_out),
+        .b(d_in),
+        .sel(enable),
+        .out(d_gated)
+    );
+    
+    dff dff_inst(
+        .clk(clk),
+        .d(d_gated),
+        .q(q_out)
+    );
+endmodule
+
 
 module half_adder(
     input wire a,
@@ -125,70 +185,41 @@ module subtractor_n #(parameter WIDTH = 8) (
 );
     wire [WIDTH-1:0] b_inv;
     wire cout;
-    genvar i;
-    generate
-        for (i = 0; i < WIDTH; i = i + 1) begin : invert_gen
-            not(b_inv[i], b[i]);
-        end
-    endgenerate
+    
+    negate_n #(.WIDTH(WIDTH)) invert(.in(b), .out(b_inv));
     adder_n #(.WIDTH(WIDTH)) sub(.a(a), .b(b_inv), .cin(1'b1), .sum(diff), .cout(cout));
+    
     not(borrow, cout);
+endmodule
+
+module increment_n #(parameter WIDTH = 8) (
+    input wire [WIDTH-1:0] in,
+    output wire [WIDTH-1:0] out,
+    output wire cout
+);
+    adder_n #(.WIDTH(WIDTH)) inc(
+        .a(in), 
+        .b({WIDTH{1'b0}}), 
+        .cin(1'b1), 
+        .sum(out), 
+        .cout(cout)
+    );
 endmodule
 
 module decrement_n #(parameter WIDTH = 4) (
     input wire [WIDTH-1:0] in,
     output wire [WIDTH-1:0] out
 );
-    wire [WIDTH-1:0] ones_comp;
     wire cout;
-    assign ones_comp = {WIDTH{1'b1}};
-    adder_n #(.WIDTH(WIDTH)) dec(.a(in), .b(ones_comp), .cin(1'b0), .sum(out), .cout(cout));
+    adder_n #(.WIDTH(WIDTH)) dec(
+        .a(in), 
+        .b({WIDTH{1'b1}}), 
+        .cin(1'b0), 
+        .sum(out), 
+        .cout(cout)
+    );
 endmodule
 
-module comparator_gte_n #(parameter WIDTH = 8) (
-    input wire [WIDTH-1:0] a,
-    input wire [WIDTH-1:0] b,
-    output wire gte
-);
-    wire [WIDTH-1:0] diff;
-    wire borrow;
-    subtractor_n #(.WIDTH(WIDTH)) sub(.a(a), .b(b), .diff(diff), .borrow(borrow));
-    not(gte, borrow);
-endmodule
-
-module comparator_eq_n #(parameter WIDTH = 8) (
-    input wire [WIDTH-1:0] a,
-    input wire [WIDTH-1:0] b,
-    output wire eq
-);
-    wire [WIDTH-1:0] xor_result;
-    wire [WIDTH-1:0] or_chain;
-    genvar i;
-    generate
-        for (i = 0; i < WIDTH; i = i + 1) begin : xor_gen
-            xor(xor_result[i], a[i], b[i]);
-        end
-    endgenerate
-    assign or_chain[0] = xor_result[0];
-    generate
-        for (i = 1; i < WIDTH; i = i + 1) begin : or_chain_gen
-            or(or_chain[i], or_chain[i-1], xor_result[i]);
-        end
-    endgenerate
-    not(eq, or_chain[WIDTH-1]);
-endmodule
-
-module comparator_gt_n #(parameter WIDTH = 4) (
-    input wire [WIDTH-1:0] a,
-    input wire [WIDTH-1:0] b,
-    output wire gt
-);
-    wire eq, gte, eq_n;
-    comparator_eq_n #(.WIDTH(WIDTH)) cmp_eq(.a(a), .b(b), .eq(eq));
-    comparator_gte_n #(.WIDTH(WIDTH)) cmp_gte(.a(a), .b(b), .gte(gte));
-    not(eq_n, eq);
-    and(gt, gte, eq_n);
-endmodule
 
 module is_zero_n #(parameter WIDTH = 8) (
     input wire [WIDTH-1:0] in,
@@ -205,6 +236,59 @@ module is_zero_n #(parameter WIDTH = 8) (
     not(is_zero, or_chain[WIDTH-1]);
 endmodule
 
+module comparator_eq_n #(parameter WIDTH = 8) (
+    input wire [WIDTH-1:0] a,
+    input wire [WIDTH-1:0] b,
+    output wire eq
+);
+    wire [WIDTH-1:0] xor_result;
+    
+    genvar i;
+    generate
+        for (i = 0; i < WIDTH; i = i + 1) begin : xor_gen
+            xor(xor_result[i], a[i], b[i]);
+        end
+    endgenerate
+    
+    is_zero_n #(.WIDTH(WIDTH)) check_all_zero(
+        .in(xor_result),
+        .is_zero(eq)
+    );
+endmodule
+
+module comparator_gte_n #(parameter WIDTH = 8) (
+    input wire [WIDTH-1:0] a,
+    input wire [WIDTH-1:0] b,
+    output wire gte
+);
+    wire [WIDTH-1:0] diff;
+    wire borrow;
+    
+    subtractor_n #(.WIDTH(WIDTH)) sub(
+        .a(a), 
+        .b(b), 
+        .diff(diff), 
+        .borrow(borrow)
+    );
+    
+    not(gte, borrow);
+endmodule
+
+module comparator_gt_n #(parameter WIDTH = 4) (
+    input wire [WIDTH-1:0] a,
+    input wire [WIDTH-1:0] b,
+    output wire gt
+);
+    wire eq, gte, eq_n;
+    
+    comparator_eq_n #(.WIDTH(WIDTH)) cmp_eq(.a(a), .b(b), .eq(eq));
+    comparator_gte_n #(.WIDTH(WIDTH)) cmp_gte(.a(a), .b(b), .gte(gte));
+    
+    not(eq_n, eq);
+    and(gt, gte, eq_n);
+endmodule
+
+
 module barrel_shift_left_11bit(
     input wire [10:0] in,
     input wire [3:0] shift_amt,
@@ -212,6 +296,7 @@ module barrel_shift_left_11bit(
 );
     wire [10:0] stage0, stage1, stage2, stage3;
     genvar i;
+    
     generate
         for (i = 0; i < 11; i = i + 1) begin : stage0_gen
             if (i == 0)
@@ -220,6 +305,7 @@ module barrel_shift_left_11bit(
                 mux2 m(.a(in[i]), .b(in[i-1]), .sel(shift_amt[0]), .out(stage0[i]));
         end
     endgenerate
+    
     generate
         for (i = 0; i < 11; i = i + 1) begin : stage1_gen
             if (i < 2)
@@ -228,6 +314,7 @@ module barrel_shift_left_11bit(
                 mux2 m(.a(stage0[i]), .b(stage0[i-2]), .sel(shift_amt[1]), .out(stage1[i]));
         end
     endgenerate
+    
     generate
         for (i = 0; i < 11; i = i + 1) begin : stage2_gen
             if (i < 4)
@@ -236,6 +323,7 @@ module barrel_shift_left_11bit(
                 mux2 m(.a(stage1[i]), .b(stage1[i-4]), .sel(shift_amt[2]), .out(stage2[i]));
         end
     endgenerate
+    
     generate
         for (i = 0; i < 11; i = i + 1) begin : stage3_gen
             if (i < 8)
@@ -244,6 +332,7 @@ module barrel_shift_left_11bit(
                 mux2 m(.a(stage2[i]), .b(stage2[i-8]), .sel(shift_amt[3]), .out(stage3[i]));
         end
     endgenerate
+    
     assign out = stage3;
 endmodule
 
@@ -254,6 +343,7 @@ module barrel_shift_right_11bit(
 );
     wire [10:0] stage0, stage1, stage2, stage3;
     genvar i;
+    
     generate
         for (i = 0; i < 11; i = i + 1) begin : stage0_gen
             if (i == 10)
@@ -262,6 +352,7 @@ module barrel_shift_right_11bit(
                 mux2 m(.a(in[i]), .b(in[i+1]), .sel(shift_amt[0]), .out(stage0[i]));
         end
     endgenerate
+    
     generate
         for (i = 0; i < 11; i = i + 1) begin : stage1_gen
             if (i > 8)
@@ -270,6 +361,7 @@ module barrel_shift_right_11bit(
                 mux2 m(.a(stage0[i]), .b(stage0[i+2]), .sel(shift_amt[1]), .out(stage1[i]));
         end
     endgenerate
+    
     generate
         for (i = 0; i < 11; i = i + 1) begin : stage2_gen
             if (i > 6)
@@ -278,6 +370,7 @@ module barrel_shift_right_11bit(
                 mux2 m(.a(stage1[i]), .b(stage1[i+4]), .sel(shift_amt[2]), .out(stage2[i]));
         end
     endgenerate
+    
     generate
         for (i = 0; i < 11; i = i + 1) begin : stage3_gen
             if (i > 2)
@@ -286,5 +379,6 @@ module barrel_shift_right_11bit(
                 mux2 m(.a(stage2[i]), .b(stage2[i+8]), .sel(shift_amt[3]), .out(stage3[i]));
         end
     endgenerate
+    
     assign out = stage3;
 endmodule
