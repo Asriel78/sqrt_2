@@ -8,6 +8,7 @@
 `include "iterate.v"
 `include "pack.v"
 `include "sqrt2_b.sv"
+`include "helper_modules.v"
 `elsif STRUCTURAL
 `include "basic_modules.v"
 `include "load_s.v"

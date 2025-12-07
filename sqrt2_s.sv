@@ -10,9 +10,6 @@ module sqrt2 (
     input  wire        ENABLE
 );
 
-    // ========================================================================
-    // LOAD: читает данные с шины
-    // ========================================================================
     wire        load_sign;
     wire [4:0]  load_exp;
     wire [9:0]  load_mant;
@@ -28,9 +25,6 @@ module sqrt2 (
         .valid(load_valid)
     );
 
-    // ========================================================================
-    // SPECIAL: определяет тип числа (NaN, Inf, normal, subnormal)
-    // ========================================================================
     wire        spec_valid;
     wire        spec_is_nan;
     wire        spec_is_pinf;
@@ -59,9 +53,6 @@ module sqrt2 (
         .mant_out(spec_mant)
     );
 
-    // ========================================================================
-    // NORMALIZE: нормализует мантиссу и экспоненту
-    // ========================================================================
     wire        norm_valid;
     wire        norm_is_num;
     wire        norm_is_nan;
@@ -93,9 +84,6 @@ module sqrt2 (
         .mant_out(norm_mant)
     );
 
-    // ========================================================================
-    // ITERATE: вычисляет квадратный корень
-    // ========================================================================
     wire        iter_valid;
     wire        iter_result;
     wire        iter_sign;
@@ -126,9 +114,6 @@ module sqrt2 (
         .is_ninf_out(iter_is_ninf)
     );
 
-    // ========================================================================
-    // PACK: упаковывает обратно в float16
-    // ========================================================================
     wire        pack_valid;
     wire        pack_result;
     wire [15:0] pack_data;
@@ -155,14 +140,11 @@ module sqrt2 (
         .is_ninf_out(pack_is_ninf)
     );
 
-    // ========================================================================
-    // Управление шиной IO_DATA
-    // ========================================================================
+
     wire drive_output;
     assign drive_output = pack_valid & pack_result;
     assign IO_DATA = drive_output ? pack_data : 16'hzzzz;
-    
-    // Выходы
+
     assign RESULT  = pack_result;
     assign IS_NAN  = pack_is_nan;
     assign IS_PINF = pack_is_pinf;
