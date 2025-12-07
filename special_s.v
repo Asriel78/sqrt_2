@@ -22,11 +22,9 @@ module special (
     output wire [9:0]  mant_out
 );
 
-    // Константы
     wire [4:0] EXP_MAX = 5'b11111;
     wire [9:0] QUIET_BIT = 10'b1000000000;
     
-    // Детекторы входных условий
     wire exp_all_ones;
     wire mant_nonzero;
     wire is_input_nan_comb;
@@ -34,30 +32,25 @@ module special (
     wire is_zero_all;
     wire is_negative_number_comb;
     
-    // exp_in == 31 (все единицы)
     comparator_eq_n #(.WIDTH(5)) exp_max_cmp(
         .a(exp_in), 
         .b(5'b11111), 
         .eq(exp_all_ones)
     );
     
-    // mant_in != 0
     is_zero_n #(.WIDTH(10)) mant_zero_check(
         .in(mant_in), 
         .is_zero(is_zero_all)
     );
     not(mant_nonzero, is_zero_all);
     
-    // is_input_nan = (exp == 31) && (mant != 0)
     and(is_input_nan_comb, exp_all_ones, mant_nonzero);
     
-    // exp_in == 0
     is_zero_n #(.WIDTH(5)) exp_zero_check(
         .in(exp_in), 
         .is_zero(is_zero_exp)
     );
     
-    // Проверка на отрицательное число (не нуль, не inf/nan)
     wire not_special;
     wire has_value;
     wire exp_or_mant;
@@ -67,11 +60,9 @@ module special (
     and(has_value, not_special, exp_or_mant);
     and(is_negative_number_comb, sign_in, has_value);
     
-    // Логика определения типа
     wire is_pinf_comb, is_ninf_comb, is_normal_comb, is_subnormal_comb;
     wire is_nan_final;
     
-    // +Inf: exp=31, mant=0, sign=0
     wire mant_is_zero;
     is_zero_n #(.WIDTH(10)) mant_z(
         .in(mant_in), 
@@ -83,46 +74,38 @@ module special (
     and(pinf_cond1, exp_all_ones, mant_is_zero);
     and(is_pinf_comb, pinf_cond1, sign_in_n);
     
-    // -Inf: exp=31, mant=0, sign=1
     and(pinf_cond2, exp_all_ones, mant_is_zero);
     and(is_ninf_comb, pinf_cond2, sign_in);
     
-    // NaN: входной NaN или отрицательное число
     or(is_nan_final, is_input_nan_comb, is_negative_number_comb);
     
-    // Normal: exp != 0 && exp != 31
     wire exp_nonzero, exp_not_max;
     not(exp_nonzero, is_zero_exp);
     not(exp_not_max, exp_all_ones);
     and(is_normal_comb, exp_nonzero, exp_not_max);
     
-    // Subnormal: exp == 0 && mant != 0
     and(is_subnormal_comb, is_zero_exp, mant_nonzero);
     
-    // Выходные данные
     wire [4:0] exp_out_comb;
     wire [9:0] mant_out_comb;
     wire sign_out_comb;
     
-    // Если NaN - выставляем специальные значения
     wire [4:0] nan_exp;
     wire [9:0] nan_mant;
     wire [9:0] mant_with_quiet;
     
     assign nan_exp = 5'b11111;
     
-    // Для входного NaN: сохраняем мантиссу с установленным quiet bit
     genvar i;
     generate
         for (i = 0; i < 10; i = i + 1) begin : mant_quiet_gen
             if (i == 9)
-                assign mant_with_quiet[i] = 1'b1; // Устанавливаем quiet bit
+                assign mant_with_quiet[i] = 1'b1;
             else
                 or(mant_with_quiet[i], mant_in[i], (i == 9 ? 1'b1 : 1'b0));
         end
     endgenerate
     
-    // Для отрицательного числа: только quiet bit
     mux2_n #(.WIDTH(10)) nan_mant_mux(
         .a(QUIET_BIT),
         .b(mant_in | QUIET_BIT),
@@ -130,7 +113,6 @@ module special (
         .out(nan_mant)
     );
     
-    // sign_out: для отрицательного числа всегда 1, иначе как на входе
     wire sign_for_nan;
     mux2 sign_nan_mux(
         .a(1'b1),
@@ -139,7 +121,6 @@ module special (
         .out(sign_for_nan)
     );
     
-    // Финальный выбор exp
     mux2_n #(.WIDTH(5)) exp_final_mux(
         .a(exp_in),
         .b(nan_exp),
@@ -147,7 +128,6 @@ module special (
         .out(exp_out_comb)
     );
     
-    // Финальный выбор mant
     mux2_n #(.WIDTH(10)) mant_final_mux(
         .a(mant_in),
         .b(nan_mant),
@@ -155,7 +135,6 @@ module special (
         .out(mant_out_comb)
     );
     
-    // Финальный выбор sign
     mux2 sign_final_mux(
         .a(sign_in),
         .b(sign_for_nan),
@@ -163,14 +142,12 @@ module special (
         .out(sign_out_comb)
     );
     
-    // Регистры вывода (захватывают данные когда valid=1 и enable=1)
     wire capture;
     and(capture, valid, enable);
     
     wire s_valid_next;
     wire s_valid_d;
     
-    // s_valid = 1 только когда valid=1
     mux2 valid_mux(
         .a(1'b0),
         .b(capture),
@@ -184,13 +161,11 @@ module special (
         .q(s_valid)
     );
     
-    // Регистры флагов и данных
     wire is_nan_d, is_pinf_d, is_ninf_d, is_normal_d, is_subnormal_d;
     wire sign_out_d;
     wire [4:0] exp_out_d;
     wire [9:0] mant_out_d;
     
-    // Захватываем только когда capture=1
     mux2 nan_reg_mux(.a(is_nan), .b(is_nan_final), .sel(capture), .out(is_nan_d));
     mux2 pinf_reg_mux(.a(is_pinf), .b(is_pinf_comb), .sel(capture), .out(is_pinf_d));
     mux2 ninf_reg_mux(.a(is_ninf), .b(is_ninf_comb), .sel(capture), .out(is_ninf_d));
@@ -200,7 +175,6 @@ module special (
     mux2_n #(.WIDTH(5)) exp_reg_mux(.a(exp_out), .b(exp_out_comb), .sel(capture), .out(exp_out_d));
     mux2_n #(.WIDTH(10)) mant_reg_mux(.a(mant_out), .b(mant_out_comb), .sel(capture), .out(mant_out_d));
     
-    // Сброс при enable=0
     wire is_nan_final_d, is_pinf_final_d, is_ninf_final_d, is_normal_final_d, is_subnormal_final_d;
     wire sign_out_final_d;
     wire [4:0] exp_out_final_d;
@@ -210,20 +184,4 @@ module special (
     mux2 pinf_en_mux(.a(1'b0), .b(is_pinf_d), .sel(enable), .out(is_pinf_final_d));
     mux2 ninf_en_mux(.a(1'b0), .b(is_ninf_d), .sel(enable), .out(is_ninf_final_d));
     mux2 normal_en_mux(.a(1'b0), .b(is_normal_d), .sel(enable), .out(is_normal_final_d));
-    mux2 subnorm_en_mux(.a(1'b0), .b(is_subnormal_d), .sel(enable), .out(is_subnormal_final_d));
-    mux2 sign_en_mux(.a(1'b0), .b(sign_out_d), .sel(enable), .out(sign_out_final_d));
-    mux2_n #(.WIDTH(5)) exp_en_mux(.a(5'b0), .b(exp_out_d), .sel(enable), .out(exp_out_final_d));
-    mux2_n #(.WIDTH(10)) mant_en_mux(.a(10'b0), .b(mant_out_d), .sel(enable), .out(mant_out_final_d));
-    
-    // D-триггеры
-    dff is_nan_ff(.clk(clk), .d(is_nan_final_d), .q(is_nan));
-    dff is_pinf_ff(.clk(clk), .d(is_pinf_final_d), .q(is_pinf));
-    dff is_ninf_ff(.clk(clk), .d(is_ninf_final_d), .q(is_ninf));
-    dff is_normal_ff(.clk(clk), .d(is_normal_final_d), .q(is_normal));
-    dff is_subnormal_ff(.clk(clk), .d(is_subnormal_final_d), .q(is_subnormal));
-    dff sign_out_ff(.clk(clk), .d(sign_out_final_d), .q(sign_out));
-    
-    register_n #(.WIDTH(5)) exp_out_reg(.clk(clk), .rst(1'b0), .d(exp_out_final_d), .q(exp_out));
-    register_n #(.WIDTH(10)) mant_out_reg(.clk(clk), .rst(1'b0), .d(mant_out_final_d), .q(mant_out));
-
-endmodule
+    mux2 subnorm_en_mux(.a(1'b0), .b(is_subnormal_d), .sel(enable), .out(

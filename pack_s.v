@@ -26,9 +26,6 @@ module pack (
 
     localparam signed [6:0] BIAS = 7'd15;
 
-    // ========================================================================
-    // Вычисление biased экспоненты: exp_in + 15
-    // ========================================================================
     wire signed [6:0] exp_biased;
     wire [6:0] bias_unsigned = 7'd15;
     wire cout_bias;
@@ -41,13 +38,8 @@ module pack (
         .cout(cout_bias)
     );
 
-    // ========================================================================
-    // Детекторы условий
-    // ========================================================================
-    
-    // Проверка на ±0: exp_in == -15 && mant_in == 0
     wire exp_is_minus15;
-    wire [6:0] minus15_pattern = 7'b1110001; // -15 в дополнительном коде
+    wire [6:0] minus15_pattern = 7'b1110001;
     comparator_eq_n #(.WIDTH(7)) exp_m15_cmp(
         .a(exp_in),
         .b(minus15_pattern),
@@ -63,7 +55,6 @@ module pack (
     wire is_zero;
     and(is_zero, exp_is_minus15, mant_is_zero);
     
-    // Проверка на subnormal результат: exp_biased <= 0
     wire exp_biased_le_zero;
     wire exp_biased_is_zero;
     wire exp_biased_is_negative;
@@ -73,14 +64,10 @@ module pack (
         .is_zero(exp_biased_is_zero)
     );
     
-    // Отрицательное число: старший бит (знак) = 1
     assign exp_biased_is_negative = exp_biased[6];
     
     or(exp_biased_le_zero, exp_biased_is_zero, exp_biased_is_negative);
 
-    // ========================================================================
-    // Обработка subnormal: вычисление shift_amt = 1 - exp_biased
-    // ========================================================================
     wire signed [6:0] one_minus_exp;
     wire [6:0] exp_biased_negated;
     wire cout_one_minus;
@@ -101,9 +88,8 @@ module pack (
     );
     
     wire [4:0] shift_amt;
-    assign shift_amt = one_minus_exp[4:0]; // Берём младшие 5 бит
+    assign shift_amt = one_minus_exp[4:0];
     
-    // Проверка: shift_amt >= 12 (все биты уйдут)
     wire shift_overflow;
     comparator_gte_n #(.WIDTH(5)) shift_overflow_check(
         .a(shift_amt),
@@ -111,11 +97,10 @@ module pack (
         .gte(shift_overflow)
     );
     
-    // Сдвиг мантиссы вправо
     wire [10:0] mant_shifted;
     barrel_shift_right_11bit mant_shifter(
         .in(mant_in),
-        .shift_amt(shift_amt[3:0]), // Берём только младшие 4 бита
+        .shift_amt(shift_amt[3:0]),
         .out(mant_shifted)
     );
     
@@ -127,30 +112,17 @@ module pack (
         .out(frac10_subnormal)
     );
 
-    // ========================================================================
-    // Обработка normal: просто берём младшие 10 бит мантиссы
-    // ========================================================================
     wire [9:0] frac10_normal;
     assign frac10_normal = mant_in[9:0];
 
-    // ========================================================================
-    // Комбинационная логика формирования выхода
-    // ========================================================================
     wire [15:0] out_data_comb;
     
-    // NaN: 1_11111_1000000000 (знак=1, exp=31, mant с quiet bit)
     wire [15:0] nan_pattern = 16'hFE00;
-    
-    // +Inf: 0_11111_0000000000
     wire [15:0] pinf_pattern = 16'h7C00;
     
-    // -Inf обрабатывается как NaN, поэтому используем nan_pattern
-    
-    // Выбор между NaN/Inf и числом
     wire [15:0] special_value;
     wire [15:0] number_value;
     
-    // Для special: выбираем между NaN и +Inf
     mux2_n #(.WIDTH(16)) special_mux(
         .a(pinf_pattern),
         .b(nan_pattern),
@@ -158,21 +130,14 @@ module pack (
         .out(special_value)
     );
     
-    // Для числа: выбираем между ±0, subnormal, normal
     wire [15:0] zero_value;
     wire [15:0] subnorm_value;
     wire [15:0] normal_value;
     
-    // ±0: sign_in, exp=0, mant=0
     assign zero_value = {sign_in, 15'b0};
-    
-    // Subnormal: sign_in, exp=0, mant=frac10_subnormal
     assign subnorm_value = {sign_in, 5'b00000, frac10_subnormal};
-    
-    // Normal: sign_in, exp=exp_biased[4:0], mant=frac10_normal
     assign normal_value = {sign_in, exp_biased[4:0], frac10_normal};
     
-    // Выбор: zero vs (subnormal vs normal)
     wire [15:0] non_zero_value;
     mux2_n #(.WIDTH(16)) subnorm_normal_mux(
         .a(normal_value),
@@ -188,7 +153,6 @@ module pack (
         .out(number_value)
     );
     
-    // Финальный выбор: special vs number
     wire is_any_special;
     or(is_any_special, is_nan_in, is_pinf_in, is_ninf_in);
     
@@ -199,32 +163,25 @@ module pack (
         .out(out_data_comb)
     );
 
-    // ========================================================================
-    // Регистры вывода
-    // ========================================================================
     wire capture;
     and(capture, it_valid, enable);
     
-    // p_valid
     wire p_valid_d;
     mux2 p_valid_mux(.a(1'b0), .b(capture), .sel(enable), .out(p_valid_d));
     dff p_valid_ff(.clk(clk), .d(p_valid_d), .q(p_valid));
     
-    // result_out
     wire result_out_d;
     mux2 result_mux(.a(result_out), .b(result_in), .sel(capture), .out(result_out_d));
     wire result_out_final;
     mux2 result_en_mux(.a(1'b0), .b(result_out_d), .sel(enable), .out(result_out_final));
     dff result_ff(.clk(clk), .d(result_out_final), .q(result_out));
     
-    // out_data
     wire [15:0] out_data_d;
     mux2_n #(.WIDTH(16)) out_data_mux(.a(out_data), .b(out_data_comb), .sel(capture), .out(out_data_d));
     wire [15:0] out_data_final;
     mux2_n #(.WIDTH(16)) out_data_en_mux(.a(16'h0000), .b(out_data_d), .sel(enable), .out(out_data_final));
     register_n #(.WIDTH(16)) out_data_reg(.clk(clk), .rst(1'b0), .d(out_data_final), .q(out_data));
     
-    // Флаги special
     wire is_nan_out_d, is_pinf_out_d, is_ninf_out_d;
     mux2 nan_out_mux(.a(is_nan_out), .b(is_nan_in), .sel(capture), .out(is_nan_out_d));
     mux2 pinf_out_mux(.a(is_pinf_out), .b(is_pinf_in), .sel(capture), .out(is_pinf_out_d));
